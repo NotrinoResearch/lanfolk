@@ -40,85 +40,141 @@ Lanfolk stores its data in `C:\ProgramData\Lanfolk`: your identity, friends, net
 
 ## First start
 
-Open **Lanfolk** from the Start Menu. On the first start:
+Open **Lanfolk** from the Start Menu. The first screen asks for one thing: the
+**name** your friends will see. You can change it later in Settings.
 
-- Your **identity is created automatically**. It is a key pair that stays on your computer, protected by Windows. There is no account and no password.
-- Choose a **nickname**. Friends see it in lists. You can change it later.
-- Your **friend code** appears in the app. It starts with `lanfolk1` and is 66 characters long. It is safe to share: it only identifies you, and nobody can join your networks with it.
+Your **identity is created automatically**. It is a key pair that stays on
+your computer, protected by Windows. There is no account and no password.
+
+Closing the window does not stop Lanfolk: it keeps running in the
+notification area (the icons next to the clock). Windows 11 puts new icons
+behind the **^** arrow; drag the Lanfolk icon onto the taskbar to keep it
+visible. Left-click it to open the window, right-click it for a menu (copy
+your IP address, switch network, invite friends, Settings, Quit). The icon
+shows the state: blue with a green node when you are connected, an amber ring
+while connecting, gray when you are not in a network.
 
 If the app says it cannot reach the service, see [Troubleshooting](#troubleshooting).
 
-Back up your identity once: in Settings, export a backup and choose a password. If you reinstall Windows without a backup, you get a new identity and your friends must add you again.
+Back up your identity once: **Settings, Identity and backup, Back up**. If you
+reinstall Windows without a backup, you get a new identity and your friends
+must add you again.
 
-## Add friends
-
-Friendship needs a code on **both sides**. One-sided adding gives nobody access.
-
-1. Copy your friend code and send it to your friend.
-2. Your friend pastes it into **Add friend**. Spaces, dashes and capital letters are ignored, and a code that was cut or mistyped is rejected immediately.
-3. Do the same in the other direction: paste your friend's code into **Add friend** on your side.
-
-The friend is shown as **pending** until the other side has added you, and as **active** afterwards. You see whether a friend is online.
-
-## Create a network
+## Create a network and invite friends
 
 A network is a private group. You can be active in one network at a time.
 
-1. Choose **New network** and give it a name.
-2. Add your active friends to it. You are the **owner**: only you can add or remove members.
-3. Each member gets a fixed virtual address between `10.77.0.2` and `10.77.0.254` (up to 253 members). Members do not need to be friends with each other.
+1. Choose **Create**, give the network a name and choose **Create network**.
+   You are its **owner**: only you can add or remove members.
+2. The next screen shows the network's **invite code** (it starts with
+   `lanfolk-i1`). Choose **Copy invite** and send it to your friends in any
+   chat. Later you find it again in the network's **⋯** menu, **Invite
+   friends**.
+3. Stay online while your friends join: Lanfolk accepts them automatically.
 
-## Join automatically
+An invite code works for **7 days** and for any number of people. Treat it
+like a password for the network: anyone who has it can join while it is
+valid. **Make a new code** on the invite screen stops the old code; people who
+already joined stay members. To remove someone, open the member's menu (**⋯**
+or right-click) and choose **Remove from …**, then make a new code.
 
-When you add a friend to your network, their Lanfolk gets the signed member list and shows the network. They choose it as their active network (if they belong to several), and everyone connects to everyone else automatically when they are online. Members keep working from the latest list if the owner is offline; only membership changes need the owner.
+Each member gets a fixed virtual address between `10.77.0.2` and
+`10.77.0.254` (up to 253 members).
 
-To leave a network, choose **Leave**. If the owner removes you, your connections to the other members close.
+## Join a network
+
+1. Choose **Join network** and paste the invite code (Lanfolk fills it in by
+   itself if you just copied it).
+2. Choose **Join network**. Until the owner is online the network shows
+   "Waiting for … to come online"; Lanfolk keeps trying, so you can close the
+   window.
+3. When the owner accepts, the network appears and becomes active if you had
+   no active network.
+
+Everyone connects to everyone else automatically when they are online.
+Members keep working from the latest member list if the owner is offline;
+only membership changes need the owner. To leave a network, open its **⋯**
+menu and choose **Leave network**.
+
+## Friends
+
+People you share a network with become friends automatically. The **Friends**
+tab shows who is online. From a friend's menu you can add them to one of your
+networks with one click (no invite code needed), copy their friend code or
+remove them.
+
+You can also add someone by hand with their **friend code** (it starts with
+`lanfolk1`): **Friends, Add friend**. Friendship needs both sides: the friend
+shows as "Waiting for them to add you" until they add your code, which you
+copy with **My friend code**.
 
 ## Start a game
 
-1. Make sure everyone is online in the same network and the connection panel shows each member (see below).
-2. One player hosts the game and the others look for it on the LAN, or join by IP address. The host's virtual address is shown next to their name.
-3. If the game asks which network adapter or IP address to use, pick the one named `Lanfolk` (`10.77.0.x`).
+1. Make sure everyone is online in the same network: their names have a green
+   dot.
+2. One player hosts the game and the others look for it on the LAN, or join by
+   IP address. Each member's virtual address is shown under their name; click
+   your own address at the top to copy it.
+3. If the game asks which network adapter or IP address to use, pick the one
+   named `Lanfolk` (`10.77.0.x`).
 
-## Read the connection panel
+## Read the member list
 
-For every member of the active network the panel shows:
+Each member shows a dot (green online, amber ring connecting, gray offline),
+the virtual address, the latest ping and how you reach them. Click a member to
+see the details; actions are in the member's **⋯** menu or on right-click.
 
 | Field | Meaning |
 | --- | --- |
-| Path | **Direct:** straight between the two computers, the best case. **Member relay:** through another member who can reach both of you. **Shared relay:** through the relay server. **TCP fallback:** through the relay server over TCP, used when UDP is blocked; this has the highest latency. |
-| Ping | Latest round trip time and the average over the last 60 seconds. |
+| Connection | **Direct:** straight between the two computers, the best case. **Member relay:** through another member who can reach both of you. **Shared relay:** through the relay server. **TCP fallback:** through the relay server over TCP, used when UDP is blocked; this has the highest latency. |
+| Route | The member or relay the traffic goes through, for relayed connections. |
+| Average ping | Round trip time averaged over the last 60 seconds (the list shows the latest one). |
 | Jitter | How much the round trip time varies over 60 seconds. |
-| Loss | Percentage of probe packets that got no answer over 60 seconds. |
+| Packet loss | Percentage of probe packets that got no answer over 60 seconds. |
 | Quality | **Good:** ping up to 60 ms, jitter up to 10 ms and loss up to 0.5 %. **Poor:** ping above 120 ms, jitter above 30 ms or loss above 2 %. **Fair:** everything in between. |
-| Relay details | The nickname of the relaying member, or the name of the relay. |
 
-A connection starts through the relay and moves to a direct path as soon as one works. The game keeps running during the change. Relayed paths add the distance to the relay server twice, so ping through the shared relay is usually higher than a direct path. If the path stays on **Shared relay** and the ping is high, one of the players may be behind a strict router; a relay closer to you helps (see [SELF_HOST.md](SELF_HOST.md)).
+A connection starts through the relay and moves to a direct path as soon as
+one works. The game keeps running during the change. Relayed paths add the
+distance to the relay server twice, so ping through the shared relay is
+usually higher than a direct path. If a member stays on **Shared relay** and
+the ping is high, one of the players may be behind a strict router; a relay
+closer to you helps (see [SELF_HOST.md](SELF_HOST.md)).
 
 ## Settings
 
-| Setting | What it does |
-| --- | --- |
-| Nickname | The name your friends see. |
-| **Relay only** | Never use direct paths. Other members then see only the relay's address, not your home address. Ping may increase. |
-| **Compatibility mode** | Lowers the virtual adapter's priority number so Windows sends broadcasts and multicasts through Lanfolk. Turn it on if a game does not find others (see [Troubleshooting](#troubleshooting)). While it is on, local broadcasts may also reach Lanfolk instead of your home network. Lanfolk restores the normal setting when you turn it off or the service stops. |
-| **Manual port** | A fixed UDP port that you forwarded in your router yourself. Optional; it can improve direct connections. `0` means automatic. |
-| **Automatic port opening** | Ask your router to open a port with UPnP, NAT-PMP or PCP. On by default; harmless if your router does not support it. |
-| **DHT fallback** | If no relay can be reached for 30 seconds, look for friends on the BitTorrent network. On by default. It only runs during relay outages. |
-| **Custom relays** | Relays you run or trust, in addition to the built-in default relay. See [SELF_HOST.md](SELF_HOST.md). |
-| Identity backup | Export or import an encrypted copy of your identity. |
-| Diagnostic report | Creates a text report for a bug report. |
+Open Settings with the gear in the window or from the tray menu. They open in
+their own window.
+
+| Page | Setting | What it does |
+| --- | --- | --- |
+| General | Nickname | The name your friends see. |
+| General | Open at sign-in | Start Lanfolk in the notification area when you sign in. The service itself always starts with Windows. |
+| General | **Compatibility mode** | Lowers the virtual adapter's priority number so Windows sends broadcasts and multicasts through Lanfolk. Turn it on if a game does not find others (see [Troubleshooting](#troubleshooting)). While it is on, local broadcasts may also reach Lanfolk instead of your home network. Lanfolk restores the normal setting when you turn it off or the service stops. |
+| Connection | **Relay only** | Never use direct paths. Other members then see only the relay's address, not your home address. Ping may increase. |
+| Connection | **Automatic port mapping** | Ask your router to open a port with UPnP, NAT-PMP or PCP. On by default; harmless if your router does not support it. |
+| Connection | **Public DHT fallback** | If no relay can be reached for 30 seconds, look for members on the BitTorrent network. On by default. It only runs during relay outages. |
+| Connection | **Fixed UDP port** | A UDP port that you forwarded in your router yourself. Optional; it can improve direct connections. Empty means automatic. |
+| Relays | Your relays | Relays you run or trust, in addition to the built-in relay and the network owner's relays. See [SELF_HOST.md](SELF_HOST.md). |
+| Identity and backup | Friend code, backup, restore | Copy your friend code; export or import an encrypted copy of your identity. |
+| Troubleshooting | Diagnostic report, connection codes | Create a text report for a bug report; use a connection code (below). |
 
 Settings apply immediately. The normal flow works with all optional settings off.
 
 ## Connection codes: when nothing else works
 
-If the relay is down and the DHT does not work either, two friends can still connect by hand with a **connection code**:
+If the relay is down and the DHT does not work either, two friends can still
+connect by hand with a **connection code**:
 
-1. One friend chooses **Create connection code** for the other friend and sends the text to them (it starts with `lanfolk-c1`).
-2. The other friend pastes it into **Use connection code**.
+1. One friend opens the other's menu (in the member list or the Friends tab)
+   and chooses **Create connection code**, then sends the text (it starts with
+   `lanfolk-c1`).
+2. The other friend pastes it under **Settings, Troubleshooting, Use a
+   connection code**.
 
-The code contains encrypted addresses of the sender, readable only by that friend, and **expires after a short time**. Create a new code if it expired. Both friends should create a code for each other if one direction does not connect.
+The code contains encrypted addresses of the sender, readable only by that
+friend, and **expires after 10 minutes**. Create a new code if it expired.
+Both friends should create a code for each other if one direction does not
+connect.
 
 ## Uninstall
 
@@ -146,13 +202,13 @@ Lanfolk adds firewall rules for the virtual adapter and marks the network Privat
 Lanfolk is open source and uses the signed Wintun driver DLL to create the adapter. If your antivirus quarantines a file, restore it, add an exception for `C:\Program Files\Lanfolk`, and check the SHA-256 checksums of the download against `SHA256SUMS`.
 
 **The relay is unreachable.**
-The relay status in the app shows `down`. Some networks block UDP or the relay's port; Lanfolk then tries the TCP fallback automatically, which shows as **TCP fallback**. If both fail: check your internet connection, try another network (for example a phone hotspot), check whether your firewall or the university or office network blocks outgoing connections, and try again later. You can add another relay in Settings, or use connection codes.
+The main window shows "No relay can be reached" (the relay is Down under Settings, Relays). Some networks block UDP or the relay's port; Lanfolk then tries the TCP fallback automatically, which shows as **TCP fallback**. If both fail: check your internet connection, try another network (for example a phone hotspot), check whether your firewall or the university or office network blocks outgoing connections, and try again later. You can add another relay under Settings, Relays, or use connection codes.
 
 **The path stays on "Shared relay" or "TCP fallback", the ping is high.**
 Direct connections need the NAT of both players to cooperate. Try again after a minute, or turn on **Automatic port opening** if it is off. A friend with an open port can improve everyone's paths. A relay in your region lowers the ping.
 
 **A friend stays "pending".**
-Your friend has not added your code yet. Ask them to paste your friend code, and check that they pasted all 66 characters.
+Your friend has not added your code yet. Ask them to paste your friend code, and check that they pasted all 66 characters. With an invite code this step is not needed: joining a network makes you friends with its owner.
 
 **I lost my identity or got a new computer.**
 Import your identity backup in Settings. Without a backup you must create a new identity and add your friends again.

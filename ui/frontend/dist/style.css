@@ -669,3 +669,6 @@ button { cursor: default; }
 .pane .row.inline-form .input { width: auto; }
 .pane .about .mark { flex: none; }
 body.is-settings .titlebar { padding-left: 16px; }
+
+.pane .row.inline-form.two { grid-template-columns: 1fr auto; }
+.dialog .textarea { margin-top: 2px; }

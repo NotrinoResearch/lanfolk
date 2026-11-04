@@ -624,7 +624,11 @@
           rowHTML('Diagnostic report', 'Connection details for a bug report. It contains no keys or passwords.',
             '<button type="button" class="btn" data-action="diagnostics">Save…</button>', 'dg') +
           rowHTML('Service', esc('Version ' + st.version + ' · UDP port ' + st.listen_port + ' · DHT ' + F.dhtLabel(st.dht).split(' ')[0].toLowerCase()), '', 'svc') +
-          '</div>';
+          '</div><h2 class="pane-sub">Use a connection code</h2>' +
+          '<p class="pane-lead">When a friend cannot reach you at all (for example the relay is down), they can create a connection code for you from their member or friend menu. Paste it here; it works for a few minutes.</p>' +
+          '<div class="card"><form class="row inline-form two" data-form="conncode" autocomplete="off">' +
+          '<input class="input" name="code" placeholder="lanfolk-c1…" aria-label="Connection code" spellcheck="false">' +
+          '<button type="submit" class="btn sm">Use code</button></form></div>';
       case 'about':
         return '<div class="card"><div class="row" data-key="about"><div class="about">' + mark(40) +
           '<div><div class="row-title">Lanfolk ' + esc(st.version) + '</div><div class="row-desc">Open source under the Apache License 2.0.</div>' +
@@ -727,6 +731,20 @@
     });
   }
 
+  function codeDialog(code, expires) {
+    var d = $('#dialog');
+    var left = F.formatExpiry(expires, Date.now());
+    d.innerHTML = '<form method="dialog"><div class="dialog-body"><h2>Connection code</h2>' +
+      '<p>Send this to your friend when nothing else connects you. They paste it under Settings, Troubleshooting. ' + esc(left) + '.</p>' +
+      '<textarea class="textarea selectable" readonly rows="4" aria-label="Connection code" data-action-focus="select">' + esc(code) + '</textarea>' +
+      '</div><div class="dialog-foot"><button type="button" class="btn" data-close>Close</button>' +
+      '<button type="submit" class="btn primary">' + icon('copy') + 'Copy</button></div></form>';
+    d.querySelector('[data-close]').onclick = function () { d.close(); };
+    d.querySelector('form').onsubmit = function (ev) { ev.preventDefault(); copy(code, 'Connection code copied'); d.close(); };
+    d.showModal();
+    d.querySelector('[type=submit]').focus();
+  }
+
   // ---- context menus ----
   // items: [action, icon, label, danger?] or ['hr']; data goes to menuAction.
   var menuData = null;
@@ -770,6 +788,7 @@
     var items = [['copy-ip', 'copy', 'Copy IP address  ' + m.virtual_ip]];
     var open = S.detail === netId + '/' + key;
     items.push(['details', 'info', open ? 'Hide details' : 'Show details']);
+    if (!m.is_self) items.push(['conncode', 'join', 'Create connection code…']);
     if (n.is_owner && !m.is_self) { items.push(['hr']); items.push(['remove-member', 'trash', 'Remove from ' + n.name + '…', true]); }
     openMenu(anchor, items, { net: netId, key: key });
   }
@@ -781,6 +800,7 @@
       ownedNetworksWithout(key).forEach(function (n) { items.push(['add-to', 'plus', 'Add to ' + n.name, false, n.id]); });
     }
     items.push(['copy-code', 'copy', 'Copy friend code']);
+    if (f.state === 'active') items.push(['conncode', 'join', 'Create connection code…']);
     items.push(['hr']);
     items.push(['remove-friend', 'trash', 'Remove friend…', true]);
     openMenu(anchor, items, { key: key });
@@ -826,6 +846,9 @@
         call('AddMember', arg, d.key).then(function () { toast('Added to ' + (target ? target.name : 'the network'), 'ok'); }, fail);
         break;
       }
+      case 'conncode':
+        call('CreateConnCode', d.key).then(function (r) { codeDialog(r.code, r.expires); }, fail);
+        break;
       case 'copy-code': {
         var fr = friendByKey(d.key);
         if (fr) copy(fr.friend_code, 'Friend code copied');
@@ -1003,6 +1026,10 @@
       if (err) { toast(err, 'bad'); return; }
       setSetting('custom_relays', (S.settings.custom_relays || []).concat([F.relayFromForm(form)]));
       f.host.value = '';
+    } else if (kind === 'conncode') {
+      var cc = f.code.value.trim();
+      if (!cc) { toast('Paste the connection code first.', 'bad'); return; }
+      call('UseConnCode', cc).then(function () { f.code.value = ''; toast('Trying the addresses in the code', 'ok'); }, fail);
     } else if (kind === 'friend') {
       var c = f.code.value.trim();
       if (!c) { toast('Paste their friend code first.', 'bad'); return; }
