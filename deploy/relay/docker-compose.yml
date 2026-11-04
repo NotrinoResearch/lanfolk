@@ -1,0 +1,32 @@
+# Lanfolk shared relay.
+# Copy this file and .env.example (renamed to .env) to /opt/lanfolk-relay,
+# then run: docker compose -p lanfolk-relay up -d
+name: lanfolk-relay
+
+services:
+  lanfolk-relay:
+    image: lanfolk-relay:${RELAY_IMAGE_TAG:-latest}
+    container_name: lanfolk-relay
+    # Host networking avoids Docker port-forwarding rules and NAT in front of
+    # the relay. Check that the ports below are free before starting.
+    network_mode: host
+    restart: unless-stopped
+    read_only: true
+    user: "65532:65532"
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    pids_limit: 256
+    mem_limit: 256m
+    environment:
+      RELAY_PUBLIC_HOST: ${RELAY_PUBLIC_HOST:?set RELAY_PUBLIC_HOST in .env}
+      RELAY_UDP_PORT: ${RELAY_UDP_PORT:-3478}
+      RELAY_TCP_PORT: ${RELAY_TCP_PORT:-443}
+      RELAY_MAX_SESSION_KBPS: ${RELAY_MAX_SESSION_KBPS:-2000}
+      RELAY_METRICS_ADDR: ${RELAY_METRICS_ADDR:-127.0.0.1:9100}
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
