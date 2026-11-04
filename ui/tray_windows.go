@@ -36,13 +36,21 @@ type tray struct {
 	pending bool
 	dirty   chan struct{}
 
-	status, copyIP, open, network, disconnect, invite, settings, quit *systray.MenuItem
-	slots                                                             [maxTrayNetworks]*systray.MenuItem
-	slotIDs                                                           [maxTrayNetworks]string
+	notices   *noticeState
+	update    UpdateInfo
+	statePath string
+	noticeQ   chan notice
+
+	updateItem, status, copyIP, open, network, disconnect, invite, settings, quit *systray.MenuItem
+	slots                                                                         [maxTrayNetworks]*systray.MenuItem
+	slotIDs                                                                       [maxTrayNetworks]string
 }
 
 func newTray(app *App, host *wailsHost) *tray {
-	return &tray{app: app, host: host, dirty: make(chan struct{}, 1)}
+	path := uiStatePath()
+	return &tray{app: app, host: host, dirty: make(chan struct{}, 1),
+		notices: newNoticeState(loadUIState(path).AnnouncedUpdate), statePath: path,
+		noticeQ: make(chan notice, 16)}
 }
 
 // start runs the tray on its own OS thread: the tray window and its message
@@ -60,6 +68,8 @@ func (t *tray) stop() { systray.Quit() }
 // observe receives every event the App emits to the window.
 func (t *tray) observe(event string, data any) {
 	t.mu.Lock()
+	var ns []notice
+	now := time.Now()
 	switch event {
 	case eventService:
 		if s, ok := data.(ServiceState); ok {
@@ -75,16 +85,35 @@ func (t *tray) observe(event string, data any) {
 	case ipc.EventNetworks:
 		if n, ok := data.([]ipc.Network); ok {
 			t.snap.Networks = n
+			ns = t.notices.networks(n, now)
 		}
 	case ipc.EventPeers:
 		if p, ok := data.([]ipc.Peer); ok {
 			t.snap.Peers = p
+			ns = t.notices.peers(t.snap.Networks, p, now)
+		}
+	case ipc.EventInvites:
+		if j, ok := data.([]ipc.PendingJoin); ok {
+			ns = t.notices.invites(j)
+		}
+	case eventUpdate:
+		if u, ok := data.(UpdateInfo); ok {
+			t.update = u
+			if ns = t.notices.updateFound(u); len(ns) > 0 {
+				go saveUIState(t.statePath, uiState{AnnouncedUpdate: u.Latest})
+			}
 		}
 	default:
 		t.mu.Unlock()
 		return
 	}
 	t.mu.Unlock()
+	for _, n := range ns {
+		select {
+		case t.noticeQ <- n:
+		default: // never block the event stream
+		}
+	}
 	select {
 	case t.dirty <- struct{}{}:
 	default:
@@ -94,6 +123,8 @@ func (t *tray) observe(event string, data any) {
 func (t *tray) onReady() {
 	systray.SetIcon(t.icon(trayAttention))
 	systray.SetTooltip("Lanfolk")
+	t.updateItem = systray.AddMenuItem("Update available", "Open the download page")
+	t.updateItem.Hide()
 	t.status = systray.AddMenuItem("Lanfolk", "")
 	t.status.Disable()
 	t.copyIP = systray.AddMenuItem("Copy my IP address", "Copy your address in the active network")
@@ -109,7 +140,7 @@ func (t *tray) onReady() {
 	t.invite = systray.AddMenuItem("Invite friends…", "Copy the invite code of the active network")
 	systray.AddSeparator()
 	t.settings = systray.AddMenuItem("Settings", "")
-	t.quit = systray.AddMenuItem("Quit Lanfolk", "Close the app; the service keeps your network running")
+	t.quit = systray.AddMenuItem("Quit Lanfolk", "Closes this app. You stay online in your network; choose Network, Disconnect to go offline.")
 
 	systray.SetOnTapped(t.toggleWindow)
 	systray.SetOnSecondaryTapped(nil) // right click shows the menu (default)
@@ -119,6 +150,21 @@ func (t *tray) onReady() {
 	t.ready = true
 	t.mu.Unlock()
 	go t.refreshLoop()
+	go t.noticeLoop()
+}
+
+// noticeLoop shows notifications one at a time, if the user wants them.
+// The setting is read from the service each time, because the Settings
+// window (another process) changes it.
+func (t *tray) noticeLoop() {
+	for n := range t.noticeQ {
+		s, err := t.app.GetSettings()
+		if err != nil || !s.Notifications {
+			continue
+		}
+		showNotice(n)
+		time.Sleep(time.Second) // let Windows queue them in order
+	}
 }
 
 func (t *tray) icon(name string) []byte {
@@ -190,6 +236,15 @@ func (t *tray) apply(force bool) {
 	} else {
 		t.invite.Hide()
 	}
+	t.mu.Lock()
+	u := t.update
+	t.mu.Unlock()
+	if u.Available {
+		t.updateItem.SetTitle("Update available: Lanfolk " + u.Latest)
+		t.updateItem.Show()
+	} else {
+		t.updateItem.Hide()
+	}
 }
 
 func (t *tray) setSlot(i int, id string) {
@@ -209,6 +264,8 @@ func (t *tray) handleClicks() {
 	}
 	for {
 		select {
+		case <-t.updateItem.ClickedCh:
+			t.doUpdate()
 		case <-t.open.ClickedCh:
 			t.doOpen()
 		case <-t.copyIP.ClickedCh:
@@ -242,6 +299,18 @@ func (t *tray) handleClicks() {
 // The tray actions; the menu and the automation API both call these.
 
 func (t *tray) doOpen() { t.showWindow() }
+
+func (t *tray) doUpdate() {
+	t.mu.Lock()
+	url := t.update.URL
+	t.mu.Unlock()
+	if url == "" {
+		url = releasesPage
+	}
+	if ctx := t.host.context(); ctx != nil {
+		wailsruntime.BrowserOpenURL(ctx, url)
+	}
+}
 
 func (t *tray) doCopyIP() {
 	t.mu.Lock()
@@ -297,6 +366,10 @@ func (t *tray) simulate(item, id string) error {
 		t.doSettings()
 	case "toggle":
 		t.toggleWindow()
+	case "update":
+		t.doUpdate()
+	case "notice": // automation: show a test notification
+		return showNotice(notice{Title: "Lanfolk test notification", Body: id})
 	default:
 		return fmt.Errorf("unknown tray item %q", item)
 	}

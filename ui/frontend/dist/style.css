@@ -584,6 +584,7 @@ button { cursor: default; }
 .dialog h2 { margin: 0 0 8px; font: 600 18px/24px var(--font-display); }
 .dialog p { margin: 0 0 14px; color: var(--text-2); font-size: 13px; line-height: 18px; }
 .dialog-foot { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 16px 20px; background: var(--surface-2); border-top: 1px solid var(--line); border-radius: 0 0 var(--radius) var(--radius); }
+.dialog-foot > :only-child { grid-column: 1 / -1; }
 
 /* ---- toasts ---- */
 .toasts { position: fixed; left: 12px; right: 12px; bottom: 68px; display: grid; gap: 8px; z-index: 30; pointer-events: none; }
@@ -672,3 +673,41 @@ body.is-settings .titlebar { padding-left: 16px; }
 
 .pane .row.inline-form.two { grid-template-columns: 1fr auto; }
 .dialog .textarea { margin-top: 2px; }
+
+/* ---- connection quality, tips, update notices, accessibility helpers ---- */
+.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+/* Filled amber or red: a working but weak connection. (An amber ring means
+   connecting; the row text always says which.) */
+.dot.fair { background: var(--warn-dot); }
+.dot.poor { background: var(--bad-dot); }
+.m-right small.q-fair { color: var(--warn); }
+.m-right small.q-poor { color: var(--bad); }
+
+.banner.info { background: var(--accent-soft); }
+.banner.info .ic { color: var(--accent-text); }
+.banner .link { font: inherit; }
+.banner .icon-btn.sm { margin: -3px -6px -3px 0; }
+.icon-btn.sm { width: 24px; height: 24px; }
+
+.tip {
+  display: flex; gap: 10px; align-items: flex-start;
+  padding: 10px 8px 10px 12px; margin-bottom: 8px;
+  border-radius: var(--radius); background: var(--accent-soft);
+  font-size: 13px; line-height: 18px;
+}
+.tip .ic { color: var(--accent-text); margin-top: 1px; }
+.tip .icon-btn.sm { margin: -3px 0; }
+
+.advice { margin: -4px 14px 10px 48px; font-size: 12px; line-height: 16px; color: var(--text-2); }
+
+.spinner.sm { width: 12px; height: 12px; }
+.btn .spinner.sm { margin-right: 2px; }
+.empty .spinner + h2 { margin-top: 16px; }
+.power.busy { cursor: progress; }
+
+.error-text.block { display: block; margin-top: 4px; }
+.input.invalid { border-bottom: 2px solid var(--bad); padding-bottom: 5px; }
+.toast { cursor: default; }

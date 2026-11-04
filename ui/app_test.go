@@ -284,7 +284,7 @@ func TestCallsAreForwarded(t *testing.T) {
 		},
 			ipc.MethodSetSettings,
 			`{"relay_only":true,"compat_mode":false,"manual_port":7777,"port_mapping":false,"dht_fallback":false,` +
-				`"custom_relays":[{"host":"r.example","udp_port":3478,"tcp_port":443}],"default_relay":""}`},
+				`"custom_relays":[{"host":"r.example","udp_port":3478,"tcp_port":443}],"default_relay":"","notifications":false,"check_updates":false}`},
 		{"SetNickname", func() error { return a.SetNickname("Ahmet") }, ipc.MethodSetNickname, `{"nickname":"Ahmet"}`},
 		{"ImportIdentity", func() error { return a.ImportIdentity("BACKUP", "pw") }, ipc.MethodImportIdentity, `{"backup":"BACKUP","password":"pw"}`},
 		{"UseConnCode", func() error { return a.UseConnCode("CODE") }, ipc.MethodUseConnCode, `{"code":"CODE"}`},

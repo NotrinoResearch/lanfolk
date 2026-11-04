@@ -23,9 +23,24 @@
     set: function (k, v) { try { window.localStorage.setItem('lanfolk.' + k, v); } catch (e) { /* storage off */ } },
   };
 
+  // Where friends without Lanfolk download it (in the invite message).
+  var DOWNLOAD_URL = 'https://github.com/NotrinoResearch/lanfolk/releases';
+  // A service that just went away is usually restarting (an update, a
+  // reboot of the service): show "Reconnecting" this long before "not running".
+  var RECONNECT_GRACE = 30000;
+  var STARTUP_GRACE = 20000; // the window opened before the service started
+  var CONNECT_HINT_AFTER = 20000; // explain a slow adapter start after this
+
   var S = {
     mode: null, // "main" | "settings"
     service: null, // {connected, message} once known
+    serviceSeen: false, // connected at least once
+    serviceLostAt: 0,
+    startedAt: Date.now(),
+    connectingSince: 0,
+    update: null, // UpdateInfo from the update check
+    portError: '',
+    portText: '',
     status: null,
     networks: [],
     peers: [],
@@ -65,13 +80,24 @@
   }
   function $(sel) { return document.querySelector(sel); }
 
+  // busy runs a call while S.busy[key] is set, so its button shows that it
+  // is working and cannot be pressed twice.
+  function busy(key, promise) {
+    S.busy[key] = true;
+    render();
+    function done() { S.busy[key] = false; render(); }
+    return Promise.resolve(promise).then(function (v) { done(); return v; }, function (e) { done(); throw e; });
+  }
+
   var toastTimer;
   function toast(msg, kind) {
     var box = $('#toasts');
-    box.innerHTML = '<div class="toast' + (kind === 'bad' ? ' bad' : '') + '">' +
-      (kind === 'ok' ? icon('check') : '') + '<span>' + esc(msg) + '</span></div>';
+    var bad = kind === 'bad';
+    box.innerHTML = '<div class="toast' + (bad ? ' bad' : '') + '"' + (bad ? ' role="alert"' : '') + ' data-action="dismiss-toast" title="Dismiss">' +
+      (kind === 'ok' ? icon('check') : bad ? icon('warning') : '') + '<span>' + esc(msg) + '</span></div>';
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(function () { box.innerHTML = ''; }, kind === 'bad' ? 6000 : 2400);
+    // Errors stay long enough to read a full sentence.
+    toastTimer = setTimeout(function () { box.innerHTML = ''; }, bad ? Math.max(8000, 60 * String(msg).length) : 2400);
   }
   function fail(e) { toast(errText(e), 'bad'); }
   function copy(text, label) {
@@ -212,9 +238,32 @@
 
   function loadingHTML() { return '<div class="empty" data-key="loading"><span class="spinner"></span></div>'; }
 
+  var graceTimer;
+  // While the service is (re)starting the window says so calmly instead of
+  // "not running"; render() is scheduled again for when the grace ends.
+  function serviceGraceLeft() {
+    var now = Date.now();
+    var until = S.serviceSeen ? S.serviceLostAt + RECONNECT_GRACE : S.startedAt + STARTUP_GRACE;
+    return Math.max(0, until - now);
+  }
+  function serviceDownHTML() {
+    var left = serviceGraceLeft();
+    if (left > 0) {
+      clearTimeout(graceTimer);
+      graceTimer = setTimeout(render, left + 50);
+      return reconnectingHTML();
+    }
+    return offlineHTML();
+  }
+  function reconnectingHTML() {
+    return '<div class="empty mute" data-key="reconnecting"><span class="spinner" aria-hidden="true"></span>' +
+      '<h2 class="gap-top">' + (S.serviceSeen ? 'Reconnecting…' : 'Starting…') + '</h2>' +
+      '<p>' + (S.serviceSeen ? 'The Lanfolk service is restarting. This takes a few seconds, for example after an update.' : 'Waiting for the Lanfolk service.') + '</p></div>';
+  }
+
   function mainHTML() {
     if (!S.mode || !S.service) return loadingHTML();
-    if (!S.service.connected) return offlineHTML();
+    if (!S.service.connected) return serviceDownHTML();
     if (!S.status) return loadingHTML();
     if (isOnboarding() && S.view === 'home') return onboardingHTML();
     switch (S.view) {
@@ -229,9 +278,10 @@
   function offlineHTML() {
     return '<div class="empty mute" data-key="offline">' + mark(56) +
       '<h2>The Lanfolk service is not running</h2>' +
-      '<p>Lanfolk needs its background service to reach your friends. If you just installed it, restart your computer.' +
+      '<p>It normally starts with Windows. If it does not come back, restart the computer; if that does not help, install Lanfolk again. Your networks and friends are kept.' +
       (S.service.message ? ' ' + esc(S.service.message) : '') + '</p>' +
-      '<div class="stack"><button type="button" class="btn" data-action="retry">' + icon('refresh') + 'Try again</button></div>' +
+      '<div class="stack"><button type="button" class="btn" data-action="retry"' + attr('disabled', S.busy.retry) + '>' +
+      (S.busy.retry ? '<span class="spinner sm" aria-hidden="true"></span>Trying…' : icon('refresh') + 'Try again') + '</button></div>' +
       '<p class="hint gap-top">This window reconnects by itself.</p></div>';
   }
 
@@ -252,8 +302,9 @@
     var net = activeNetwork();
     var ip = S.status.virtual_ip;
     var html = '<section class="me" data-key="me">' +
-      '<button type="button" class="power' + (net ? ' on' : '') + '" data-action="power" aria-pressed="' + !!net + '"' +
-      attr('disabled', S.networks.length === 0) + ' title="' + (net ? 'Go offline' : 'Go online') + '" aria-label="' + (net ? 'Go offline' : 'Go online') + '">' + icon('power') + '</button>' +
+      '<button type="button" class="power' + (net ? ' on' : '') + (S.busy.power ? ' busy' : '') + '" data-action="power" aria-pressed="' + !!net + '"' +
+      attr('disabled', S.networks.length === 0 || S.busy.power) +
+      ' title="' + (S.networks.length === 0 ? 'Create or join a network first' : net ? 'Go offline' : 'Go online') + '" aria-label="Online">' + icon('power') + '</button>' +
       '<div class="me-text"><div class="me-name">' + esc(S.status.nickname) + '</div>' +
       '<div class="me-status"><span class="dot ' + me.dot + '"></span><span>' + esc(me.text) + '</span></div></div>' +
       (ip ? '<button type="button" class="ip-chip" data-action="copy" data-text="' + esc(ip) + '" data-label="IP address copied" title="Copy your IP address">' + esc(ip) + icon('copy') + '</button>' : '') +
@@ -274,14 +325,15 @@
       tabHTML('friends', 'Friends', S.friends.length ? String(fo) + ' online' : '') + '</div>';
 
     if (S.tab === 'friends') {
-      html += '<div class="scroll" data-key="friends-list" role="tabpanel"><div class="list">' + friendsHTML() + '</div></div>';
+      html += '<div class="scroll" data-key="friends-list" role="tabpanel" id="panel-friends" aria-labelledby="tab-friends"><div class="list">' + friendsHTML() + '</div></div>';
       html += '<footer class="actions" data-key="f-actions">' +
         '<button type="button" class="btn" data-action="copy" data-text="' + esc(S.status.friend_code) + '" data-label="Friend code copied">' + icon('copy') + 'My friend code</button>' +
         '<button type="button" class="btn primary" data-action="go" data-view="add-friend">' + icon('invite') + 'Add friend</button></footer>';
       return html;
     }
 
-    html += '<div class="scroll" data-key="list" role="tabpanel"><div class="list">';
+    html += '<div class="scroll" data-key="list" role="tabpanel" id="panel-networks" aria-labelledby="tab-networks"><div class="list">';
+    html += playTipHTML();
     joins.forEach(function (j) { html += pendingHTML(j); });
     if (S.networks.length === 0) {
       html += '<p class="list-empty">You are not in a network yet.</p>';
@@ -296,24 +348,66 @@
 
   function tabHTML(id, label, meta) {
     var on = S.tab === id;
-    return '<button type="button" role="tab" class="tab' + (on ? ' on' : '') + '" aria-selected="' + on + '" data-action="tab" data-id="' + id + '">' +
+    return '<button type="button" role="tab" id="tab-' + id + '" aria-controls="panel-' + id + '" tabindex="' + (on ? '0' : '-1') + '" class="tab' + (on ? ' on' : '') + '" aria-selected="' + on + '" data-action="tab" data-id="' + id + '">' +
       esc(label) + (meta ? '<span class="tab-meta">' + esc(meta) + '</span>' : '') + '</button>';
   }
 
+  // Banners, most important first; at most two so the list stays visible.
   function bannersHTML() {
     var st = S.status;
+    var out = [];
     if (st.adapter_error) {
-      return '<div class="banner bad" data-key="b-adapter" role="alert">' + icon('warning') +
+      out.push('<div class="banner bad" data-key="b-adapter" role="alert">' + icon('warning') +
         '<div><strong>The network adapter could not start.</strong> ' + esc(st.adapter_error) +
-        ' Restarting the computer usually helps.</div></div>';
+        ' Restarting the computer usually helps. <button type="button" class="link" data-action="diagnostics">Save a diagnostic report</button></div></div>');
     }
     var net = activeNetwork();
+    if (net && !st.adapter_error && !st.adapter_up && S.connectingSince && Date.now() - S.connectingSince > CONNECT_HINT_AFTER) {
+      out.push('<div class="banner" data-key="b-slow">' + icon('info') +
+        '<div>Still connecting. Windows is setting up the Lanfolk network adapter, which can take up to a minute after an update. If it does not finish, restart the computer.</div></div>');
+    }
     var up = (st.relays || []).some(function (r) { return r.mode === 'udp' || r.mode === 'tcp'; });
     if (net && (st.relays || []).length && !up) {
-      return '<div class="banner" data-key="b-relay">' + icon('warning') +
-        '<div>No relay can be reached. Friends with a direct path still connect; others may not until it is back.</div></div>';
+      out.push('<div class="banner" data-key="b-relay">' + icon('warning') +
+        '<div>No relay server can be reached, so only friends with a direct connection can see you. Check your internet connection; a firewall that blocks UDP can also cause this.</div></div>');
     }
-    return '';
+    (st.warnings || []).forEach(function (w, i) {
+      if (st.adapter_error && /network adapter/i.test(w)) return; // shown above
+      out.push('<div class="banner" data-key="b-w' + i + '">' + icon('info') + '<div>' + esc(w) + '</div></div>');
+    });
+    var u = S.update;
+    if (u && u.available && store.get('dismissed-update') !== u.latest) {
+      out.push('<div class="banner info" data-key="b-update">' + icon('info') +
+        '<div class="grow">Lanfolk ' + esc(u.latest) + ' is available. <button type="button" class="link" data-action="url" data-url="' + esc(u.url || DOWNLOAD_URL) + '">Download</button></div>' +
+        '<button type="button" class="icon-btn sm" data-action="dismiss-update" title="Hide until the next version" aria-label="Hide the update notice">' + icon('close') + '</button></div>');
+    } else {
+      var newer = newestMemberVersion();
+      if (newer && store.get('dismissed-update') !== newer.version) {
+        out.push('<div class="banner info" data-key="b-newer">' + icon('info') +
+          '<div class="grow">' + esc(newer.nickname) + ' uses a newer Lanfolk (' + esc(newer.version) + '). <button type="button" class="link" data-action="url" data-url="' + DOWNLOAD_URL + '">Get it</button></div>' +
+          '<button type="button" class="icon-btn sm" data-action="dismiss-update" data-version="' + esc(newer.version) + '" title="Hide" aria-label="Hide the update notice">' + icon('close') + '</button></div>');
+      }
+    }
+    return out.slice(0, 2).join('');
+  }
+
+  // The member with the newest Lanfolk, if it is newer than ours.
+  function newestMemberVersion() {
+    var ours = S.status && S.status.version;
+    var best = null;
+    S.peers.forEach(function (p) {
+      if (p.online && F.versionRelation(p.version, ours) === 'newer' && (!best || F.compareVersions(p.version, best.version) > 0)) best = p;
+    });
+    return best;
+  }
+
+  // A one-time tip once someone else is online in the active network.
+  function playTipHTML() {
+    var net = activeNetwork();
+    if (!net || store.get('tip-play') || !S.peers.some(function (p) { return p.online && p.path && p.path !== 'none'; })) return '';
+    return '<div class="tip" data-key="tip-play">' + icon('info') +
+      '<div class="grow"><strong>Ready to play.</strong> Start the game and open its LAN or local multiplayer list. If it asks for an IP address, use the one under a name.</div>' +
+      '<button type="button" class="icon-btn sm" data-action="dismiss-tip" title="Got it" aria-label="Hide this tip">' + icon('close') + '</button></div>';
   }
 
   function pendingHTML(j) {
@@ -339,7 +433,8 @@
       '<button type="button" class="net-toggle" data-action="toggle-net" data-id="' + esc(n.id) + '" aria-expanded="' + !!open + '">' +
       icon('chevron') + '<span class="net-name">' + esc(n.name) + '</span>' +
       '<span class="net-meta">' + esc(meta) + '</span></button>' +
-      (n.active ? '' : '<button type="button" class="btn net-connect" data-action="connect" data-id="' + esc(n.id) + '">Connect</button>') +
+      (n.active ? '' : '<button type="button" class="btn net-connect" data-action="connect" data-id="' + esc(n.id) + '"' + attr('disabled', S.busy['connect-' + n.id]) + '>' +
+        (S.busy['connect-' + n.id] ? 'Connecting…' : 'Connect') + '</button>') +
       '<button type="button" class="icon-btn" data-action="net-menu" data-id="' + esc(n.id) + '" aria-haspopup="menu" title="More" aria-label="More options for ' + esc(n.name) + '">' + icon('more') + '</button>' +
       '</div>';
     if (open) {
@@ -369,12 +464,15 @@
     return self.concat(rest);
   }
 
-  function tagsHTML(m) {
+  function tagsHTML(m, p) {
     var t = [];
     if (m.is_self) t.push('You');
     if (m.is_owner) t.push('Owner');
-    return t.length ? '<small>' + t.join(' · ') + '</small>' : '';
+    if (p && p.online && F.versionRelation(p.version, S.status && S.status.version) === 'older') t.push('Older Lanfolk');
+    return t.length ? '<small>' + esc(t.join(' · ')) + '</small>' : '';
   }
+
+  var DOT_TEXT = { online: 'Online', fair: 'Online, fair connection', poor: 'Online, poor connection', connecting: 'Connecting', offline: 'Offline', attention: 'Problem' };
 
   // A member is one row; selecting it extends the same row downwards with
   // the connection readout. Actions are in the row's menu.
@@ -384,20 +482,21 @@
     var open = S.detail === id;
     var dot = 'offline';
     var right = '';
+    var p = n.active && !m.is_self ? peerByKey(key) : null;
     if (m.is_self) {
       dot = n.active ? selfState().dot : 'offline';
     } else if (n.active) {
-      var sum = F.memberSummary(peerByKey(key));
+      var sum = F.memberSummary(p);
       dot = sum.state;
-      right = sum.state === 'online'
-        ? '<span class="m-right">' + esc(sum.text) + '<small>' + esc(sum.sub) + '</small></span>'
-        : '<span class="m-right ' + sum.state + '">' + esc(sum.text) + '</span>';
+      right = sum.state === 'offline' || sum.state === 'connecting'
+        ? '<span class="m-right ' + sum.state + '">' + esc(sum.text) + '</span>'
+        : '<span class="m-right">' + esc(sum.text) + '<small class="' + (sum.state !== 'online' ? 'q-' + sum.state : '') + '">' + esc(sum.sub) + '</small></span>';
     }
     var html = '<li class="member' + (open ? ' open' : '') + '" data-key="m-' + esc(key) + '" data-ctx="member" data-id="' + esc(n.id) + '" data-key2="' + esc(key) + '">' +
       '<div class="member-line">' +
       '<button type="button" class="member-row" data-action="member" data-id="' + esc(n.id) + '" data-key2="' + esc(key) + '" aria-expanded="' + open + '">' +
-      '<span class="dot ' + dot + '" aria-hidden="true"></span>' +
-      '<span class="m-name">' + esc(m.nickname || 'Unnamed') + tagsHTML(m) +
+      '<span class="dot ' + dot + '" aria-hidden="true"></span><span class="sr-only">' + esc(DOT_TEXT[dot] || '') + ', </span>' +
+      '<span class="m-name">' + esc(m.nickname || 'Unnamed') + tagsHTML(m, p) +
       '<span class="m-ip">' + esc(m.virtual_ip) + '</span></span>' + right + '</button>' +
       '<button type="button" class="icon-btn row-more" data-action="member-menu" data-id="' + esc(n.id) + '" data-key2="' + esc(key) + '" aria-haspopup="menu" title="More" aria-label="More options for ' + esc(m.nickname) + '">' + icon('more') + '</button>' +
       '</div>';
@@ -408,6 +507,7 @@
   function memberDetailHTML(n, m) {
     var p = n.active && !m.is_self ? peerByKey(m.public_key) : null;
     var cells = [];
+    var advice = '';
     if (p && F.isPeerMeasured(p)) {
       var q = F.qualityBadge(p.quality);
       var via = F.relayDetail(p);
@@ -417,6 +517,10 @@
       cells.push(['Jitter', F.formatMs(p.jitter_ms)]);
       cells.push(['Packet loss', F.formatPercent(p.loss_pct)]);
       cells.push(['Quality', '<span class="q-' + q.cls + '">' + esc(q.label) + '</span>', true]);
+      var rel = F.versionRelation(p.version, S.status && S.status.version);
+      cells.push(['Lanfolk', p.version ? p.version + (rel === 'older' ? ' (older than yours)' : rel === 'newer' ? ' (newer than yours)' : '') : 'Older than 0.3.0']);
+      advice = F.connectionAdvice(p);
+      if (rel === 'older') advice = (advice ? advice + ' ' : '') + 'Ask ' + (m.nickname || 'them') + ' to update Lanfolk for the latest fixes.';
     } else if (m.is_self) {
       cells.push(['Status', n.active ? selfState().text : 'Not connected to this network']);
     } else if (n.active) {
@@ -429,7 +533,9 @@
     cells.forEach(function (c) {
       html += '<div><dt>' + esc(c[0]) + '</dt><dd>' + (c[2] ? c[1] : esc(c[1])) + '</dd></div>';
     });
-    return html + '</dl>';
+    html += '</dl>';
+    if (advice) html += '<p class="advice">' + esc(advice) + '</p>';
+    return html;
   }
 
   function friendsHTML() {
@@ -485,8 +591,8 @@
     var code = S.args.code || '';
     return subhead('Join a network') +
       '<form class="form" data-form="join" data-key="join" autocomplete="off">' +
-      '<p class="lead">Paste the invite code a friend sent you.</p>' +
-      '<div class="field"><label for="jn-code">Invite code</label>' +
+      '<p class="lead">Paste the invite a friend sent you: the whole message or just the code.</p>' +
+      '<div class="field"><label for="jn-code">Invite</label>' +
       '<textarea class="textarea" id="jn-code" name="code" rows="4" spellcheck="false" placeholder="lanfolk-i1…" data-sync' + (code ? '' : ' data-autofocus') + '>' + esc(code) + '</textarea>' +
       (S.joinError ? '<p class="error-text" role="alert">' + esc(S.joinError) + '</p>' : (S.args.pasted ? '<p class="hint">Pasted from your clipboard.</p>' : '')) +
       '</div><div><button type="button" class="btn" data-action="paste">' + icon('paste') + 'Paste</button></div>' +
@@ -503,18 +609,18 @@
     var known = S.friends.filter(function (f) { return f.state === 'active' && !memberOf(n, f.public_key); });
     return subhead('Invite friends') +
       '<div class="form" data-key="invite">' +
-      '<p class="lead">Send this code to your friends to let them into <strong>' + esc(n.name) + '</strong>.</p>' +
+      '<p class="lead">Send this invite to your friends to let them into <strong>' + esc(n.name) + '</strong>.</p>' +
       '<div class="code-box"><textarea class="textarea selectable" readonly rows="4" aria-label="Invite code" data-action-focus="select" data-sync>' +
       esc(inv ? inv.code : 'Creating the code…') + '</textarea></div>' +
       '<div class="validity"><span>' + esc(inv ? F.inviteValidity(inv.expires, Date.now()) : '') + '</span>' +
       (inv ? '<button type="button" class="link" data-action="reset-invite">Make a new code</button>' : '') + '</div>' +
-      '<ol class="steps"><li>Send it in Discord, WhatsApp or any chat.</li>' +
-      '<li>Your friend opens Lanfolk, chooses Join network and pastes it.</li>' +
+      '<ol class="steps"><li>Copy the invite and send it in Discord, WhatsApp or any chat. It includes the download link for friends without Lanfolk.</li>' +
+      '<li>Your friend chooses Join network in Lanfolk and pastes the whole message.</li>' +
       '<li>Stay online until they show up in your network.</li></ol>' +
       (known.length ? '<p class="hint gap-top">Already friends? Add them directly from the Friends tab.</p>' : '') +
       '<div class="grow"></div>' +
       '<button type="button" class="btn primary block" data-action="copy-invite"' + attr('disabled', !inv) + '>' +
-      icon(copied ? 'check' : 'copy') + (copied ? 'Copied' : 'Copy invite') + '</button></div>';
+      icon(copied ? 'check' : 'copy') + (copied ? 'Copied' : 'Copy invite message') + '</button></div>';
   }
 
   function addFriendHTML() {
@@ -528,7 +634,7 @@
       '<div class="field"><label>Your friend code</label><div class="code-line"><span class="mono selectable grow">' + esc(S.status.friend_code) + '</span>' +
       '<button type="button" class="icon-btn" data-action="copy" data-text="' + esc(S.status.friend_code) + '" data-label="Friend code copied" title="Copy your friend code" aria-label="Copy your friend code">' + icon('copy') + '</button></div></div>' +
       '<div class="grow"></div>' +
-      '<button type="submit" class="btn primary block">Add friend</button></form>';
+      '<button type="submit" class="btn primary block"' + attr('disabled', S.busy.friend) + '>' + (S.busy.friend ? 'Adding…' : 'Add friend') + '</button></form>';
   }
 
   // ------------------------------------------------------- settings window --
@@ -544,7 +650,7 @@
 
   function settingsWindowHTML() {
     if (!S.mode || !S.service) return loadingHTML();
-    if (!S.service.connected) return offlineHTML();
+    if (!S.service.connected) return serviceDownHTML();
     if (!S.status) return loadingHTML();
     var nav = '<nav class="side" aria-label="Settings pages" data-key="side">';
     PAGES.forEach(function (p) {
@@ -580,6 +686,10 @@
             S.autostart == null ? '' : toggleHTML('autostart', S.autostart, 'Open at sign-in'), 'auto') +
           (s ? rowHTML('Compatibility mode', 'Turn on if a game does not find the others. Sends all broadcast traffic through Lanfolk.',
             toggleHTML('compat_mode', s.compat_mode, 'Compatibility mode'), 'compat') : '') +
+          (s ? rowHTML('Notifications', 'When a friend comes online or joins your network. Windows keeps them quiet during full-screen games.',
+            toggleHTML('notifications', s.notifications, 'Notifications'), 'notif') : '') +
+          (s ? rowHTML('Check for updates', 'Once a day Lanfolk asks GitHub for the newest version number. Nothing else is sent.',
+            toggleHTML('check_updates', s.check_updates, 'Check for updates'), 'upd') : '') +
           '</div>';
       case 'connection':
         if (!s) return loadingHTML();
@@ -587,8 +697,10 @@
           rowHTML('Relay only', 'Hides your IP address from members. Adds latency.', toggleHTML('relay_only', s.relay_only, 'Relay only'), 'ro') +
           rowHTML('Automatic port mapping', 'Ask your router (UPnP, NAT-PMP) to open a port for faster direct connections.', toggleHTML('port_mapping', s.port_mapping, 'Automatic port mapping'), 'pm') +
           rowHTML('Public DHT fallback', 'If no relay can be reached, find members through the BitTorrent DHT. Your IP address becomes visible there.', toggleHTML('dht_fallback', s.dht_fallback, 'Public DHT fallback'), 'dht') +
-          rowHTML('Fixed UDP port', 'For a port you forwarded on your router. Leave empty for automatic.',
-            '<input class="input narrow num" data-field="manual_port" inputmode="numeric" maxlength="5" placeholder="Auto" value="' + (s.manual_port ? s.manual_port : '') + '" aria-label="Fixed UDP port">', 'mp') +
+          rowHTML('Fixed UDP port', 'For a port you forwarded on your router. Leave empty for automatic. Takes effect after the service restarts.' +
+            (S.portError ? '<span class="error-text block" id="mp-err" role="alert">' + esc(S.portError) + '</span>' : ''),
+            '<input class="input narrow num' + (S.portError ? ' invalid' : '') + '" data-field="manual_port" inputmode="numeric" maxlength="5" placeholder="Auto" value="' + esc(S.portError ? S.portText : (s.manual_port ? s.manual_port : '')) + '" aria-label="Fixed UDP port"' +
+            (S.portError ? ' aria-invalid="true" aria-describedby="mp-err"' : '') + '>', 'mp') +
           '</div><p class="pane-note">Lanfolk listens on UDP port ' + esc(st.listen_port) + (st.port_mapping ? ', mapped by your router (' + esc(st.port_mapping.toUpperCase()) + ')' : '') + '.</p>';
       case 'relays': {
         if (!s) return loadingHTML();
@@ -628,15 +740,28 @@
           '<p class="pane-lead">When a friend cannot reach you at all (for example the relay is down), they can create a connection code for you from their member or friend menu. Paste it here; it works for a few minutes.</p>' +
           '<div class="card"><form class="row inline-form two" data-form="conncode" autocomplete="off">' +
           '<input class="input" name="code" placeholder="lanfolk-c1…" aria-label="Connection code" spellcheck="false">' +
-          '<button type="submit" class="btn sm">Use code</button></form></div>';
+          '<button type="submit" class="btn sm"' + attr('disabled', S.busy.conncode) + '>' + (S.busy.conncode ? 'Trying…' : 'Use code') + '</button></form></div>';
       case 'about':
         return '<div class="card"><div class="row" data-key="about"><div class="about">' + mark(40) +
           '<div><div class="row-title">Lanfolk ' + esc(st.version) + '</div><div class="row-desc">Source available under the PolyForm Noncommercial License 1.0.0. Free for personal use.</div>' +
+          '<div class="row-desc gap-top-sm" data-key="upd-state">' + updateStateHTML() + '</div>' +
           '<div class="about-links"><button type="button" class="link" data-action="url" data-url="https://github.com/NotrinoResearch/lanfolk">Project page</button>' +
           '<button type="button" class="link" data-action="url" data-url="https://github.com/NotrinoResearch/lanfolk/blob/main/THIRD_PARTY_NOTICES.md">Third-party notices</button></div>' +
           '</div></div></div></div>';
     }
     return '';
+  }
+
+  function updateStateHTML() {
+    var u = S.update;
+    var check = '<button type="button" class="link" data-action="check-updates"' + attr('disabled', S.busy.update) + '>' + (S.busy.update ? 'Checking…' : 'Check for updates') + '</button>';
+    if (!u) return check;
+    if (u.available) {
+      return '<strong>Lanfolk ' + esc(u.latest) + ' is available.</strong> <button type="button" class="link" data-action="url" data-url="' + esc(u.url || DOWNLOAD_URL) + '">Download</button>' +
+        '<br><span class="muted">Run the new installer over this one; your networks and friends are kept.</span>';
+    }
+    if (u.latest) return 'You have the newest version. ' + check;
+    return esc(u.error ? 'Could not check for updates (' + u.error + '). ' : '') + check;
   }
 
   // --------------------------------------------------------------- actions --
@@ -671,10 +796,14 @@
   function sniffClipboard() {
     if (S.args.code || typeof rt.ClipboardGetText !== 'function') return;
     rt.ClipboardGetText().then(function (t) {
-      if (S.view === 'join' && !S.args.code && F.looksLikeInvite(t)) {
-        S.args.code = String(t).trim();
+      var found = F.extractInvite(t);
+      if (S.view === 'join' && !S.args.code && found) {
+        S.args.code = found;
         S.args.pasted = true;
         render();
+        // The field has the focus, so render() does not overwrite it.
+        var ta = $('#jn-code');
+        if (ta && !ta.value.trim()) ta.value = found;
       }
     }, function () {});
   }
@@ -700,12 +829,16 @@
     var net = activeNetwork();
     if (net) {
       store.set('last-network', net.id);
-      call('ActivateNetwork', '').catch(fail);
+      busy('power', call('ActivateNetwork', '')).catch(fail);
       return;
     }
     var id = store.get('last-network');
     if (!networkById(id)) id = sortedNetworks()[0] && sortedNetworks()[0].id;
-    if (id) call('ActivateNetwork', id).catch(fail);
+    if (id) activate(id);
+  }
+
+  function activate(id) {
+    return busy('power', busy('connect-' + id, call('ActivateNetwork', id))).catch(fail);
   }
 
   function confirmDialog(opts) {
@@ -714,11 +847,12 @@
       d.innerHTML = '<form method="dialog"><div class="dialog-body"><h2>' + esc(opts.title) + '</h2><p>' + esc(opts.text) + '</p>' +
         (opts.input ? '<input class="input" name="v" ' + (opts.password ? 'type="password" ' : '') + 'value="' + esc(opts.value || '') + '" aria-label="' + esc(opts.input) + '" placeholder="' + esc(opts.input) + '" maxlength="64">' : '') +
         (opts.input2 ? '<input class="input gap-top-sm" name="v2" type="password" aria-label="' + esc(opts.input2) + '" placeholder="' + esc(opts.input2) + '">' : '') +
-        '</div><div class="dialog-foot"><button type="button" class="btn" value="cancel" data-close>Cancel</button>' +
+        '</div><div class="dialog-foot">' + (opts.noCancel ? '' : '<button type="button" class="btn" value="cancel" data-close>Cancel</button>') +
         '<button type="submit" class="btn primary" value="ok">' + esc(opts.ok || 'OK') + '</button></div></form>';
       var done = false;
       function finish(v) { if (!done) { done = true; d.close(); resolve(v); } }
-      d.querySelector('[data-close]').onclick = function () { finish(null); };
+      var cancel = d.querySelector('[data-close]');
+      if (cancel) cancel.onclick = function () { finish(null); };
       d.querySelector('form').onsubmit = function (ev) {
         ev.preventDefault();
         var f = ev.target;
@@ -748,9 +882,11 @@
   // ---- context menus ----
   // items: [action, icon, label, danger?] or ['hr']; data goes to menuAction.
   var menuData = null;
+  var menuReturn = null; // focus goes back here when the menu closes by keyboard or choice
   function openMenu(anchor, items, data) {
     var m = $('#menu');
     menuData = data;
+    menuReturn = anchor && anchor.focus ? anchor : document.activeElement;
     m.innerHTML = items.map(function (it, i) {
       if (it[0] === 'hr') return '<hr>';
       return '<button type="button" role="menuitem" class="' + (it[3] ? 'danger' : '') + '" data-menu="' + esc(it[0]) + '" data-arg="' + esc(it[4] || '') + '">' + icon(it[1]) + '<span>' + esc(it[2]) + '</span></button>';
@@ -770,7 +906,16 @@
     var first = m.querySelector('button');
     if (first) first.focus();
   }
-  function closeMenu() { var m = $('#menu'); if (m && !m.hidden) { m.hidden = true; m.innerHTML = ''; menuData = null; } }
+  function closeMenu(restoreFocus) {
+    var m = $('#menu');
+    if (!m || m.hidden) return;
+    m.hidden = true;
+    m.innerHTML = '';
+    menuData = null;
+    var back = menuReturn;
+    menuReturn = null;
+    if (restoreFocus && back && document.contains(back)) back.focus();
+  }
 
   function networkMenu(anchor, net) {
     var items = [];
@@ -808,15 +953,15 @@
 
   function menuAction(what, arg) {
     var d = menuData || {};
-    closeMenu();
+    closeMenu(true);
     var n = d.net ? networkById(d.net) : null;
     switch (what) {
       case 'invite': go('invite', { network_id: d.net }); break;
-      case 'connect': call('ActivateNetwork', d.net).catch(fail); break;
+      case 'connect': activate(d.net); break;
       case 'disconnect': store.set('last-network', d.net); call('ActivateNetwork', '').catch(fail); break;
       case 'rename':
         if (!n) return;
-        confirmDialog({ title: 'Rename network', text: 'Members see the new name the next time they connect.', input: 'Network name', value: n.name, ok: 'Rename' })
+        confirmDialog({ title: 'Rename network', text: 'Members who are online see the new name right away, the others when they connect.', input: 'Network name', value: n.name, ok: 'Rename' })
           .then(function (r) { if (r && r.v.trim()) call('RenameNetwork', d.net, r.v.trim()).catch(fail); });
         break;
       case 'leave':
@@ -875,7 +1020,21 @@
     var id = el.getAttribute('data-id');
     var key = el.getAttribute('data-key2');
     switch (a) {
-      case 'retry': call('Retry'); break;
+      case 'retry':
+        // The window reconnects by itself; the button just does it now.
+        busy('retry', Promise.all([call('Retry'), new Promise(function (r) { setTimeout(r, 1500); })])).catch(function () {});
+        break;
+      case 'dismiss-toast': $('#toasts').innerHTML = ''; break;
+      case 'dismiss-update': {
+        var v = el.getAttribute('data-version') || (S.update && S.update.latest);
+        if (v) store.set('dismissed-update', v);
+        render();
+        break;
+      }
+      case 'dismiss-tip': store.set('tip-play', '1'); render(); break;
+      case 'check-updates':
+        busy('update', call('CheckForUpdates')).then(function (u) { S.update = u; render(); }, fail);
+        break;
       case 'go': go(el.getAttribute('data-view')); break;
       case 'back': go('home'); break;
       case 'tab': S.tab = id; S.detail = null; render(); break;
@@ -889,7 +1048,7 @@
         render();
         break;
       }
-      case 'connect': call('ActivateNetwork', id).catch(fail); break;
+      case 'connect': activate(id); break;
       case 'net-menu': ev.stopPropagation(); networkMenu(el, networkById(id)); break;
       case 'member-menu': ev.stopPropagation(); memberMenu(el, id, key); break;
       case 'friend-menu': ev.stopPropagation(); friendMenu(el, key); break;
@@ -910,7 +1069,7 @@
       case 'paste':
         if (typeof rt.ClipboardGetText === 'function') {
           rt.ClipboardGetText().then(function (t) {
-            S.args.code = String(t || '').trim();
+            S.args.code = F.extractInvite(t) || String(t || '').trim();
             S.args.pasted = false;
             S.joinError = '';
             render();
@@ -921,7 +1080,8 @@
         break;
       case 'copy-invite':
         if (S.inviteCode) {
-          call('CopyToClipboard', S.inviteCode.code).then(function () {
+          var inet = networkById(S.inviteCode.network_id);
+          call('CopyToClipboard', F.inviteMessage(S.inviteCode.code, inet ? inet.name : 'Lanfolk', DOWNLOAD_URL)).then(function () {
             S.copied = 'invite';
             render();
             setTimeout(function () { if (S.copied === 'invite') { S.copied = null; render(); } }, 2400);
@@ -971,10 +1131,11 @@
       if (v && v !== S.status.nickname) call('SetNickname', v).then(function () { toast('Nickname saved', 'ok'); }, fail);
     } else if (field === 'manual_port') {
       var txt = t.value.trim();
-      if (txt === '') { setSetting('manual_port', 0); return; }
-      var e = F.validatePort(txt);
-      if (e) { toast(e, 'bad'); return; }
-      setSetting('manual_port', Number(txt));
+      var e = txt === '' ? '' : F.validatePort(txt);
+      S.portError = e;
+      S.portText = txt;
+      if (e) { render(); return; } // the field keeps what was typed
+      setSetting('manual_port', txt === '' ? 0 : Number(txt));
     }
   });
 
@@ -1006,9 +1167,10 @@
         go('invite', { network_id: n.id });
       }, function (e) { S.busy.create = false; render(); fail(e); });
     } else if (kind === 'join') {
-      var code = f.code.value.trim();
-      if (!F.looksLikeInvite(code)) {
-        S.joinError = code ? 'That does not look like an invite code. It starts with lanfolk-i1.' : 'Paste the invite code first.';
+      var typed = f.code.value.trim();
+      var code = F.extractInvite(typed);
+      if (!code) {
+        S.joinError = typed ? 'There is no invite code in that text. It starts with lanfolk-i1.' : 'Paste the invite first.';
         render();
         return;
       }
@@ -1029,11 +1191,13 @@
     } else if (kind === 'conncode') {
       var cc = f.code.value.trim();
       if (!cc) { toast('Paste the connection code first.', 'bad'); return; }
-      call('UseConnCode', cc).then(function () { f.code.value = ''; toast('Trying the addresses in the code', 'ok'); }, fail);
+      if (S.busy.conncode) return;
+      busy('conncode', call('UseConnCode', cc)).then(function () { f.code.value = ''; toast('Trying the addresses in the code', 'ok'); }, fail);
     } else if (kind === 'friend') {
       var c = f.code.value.trim();
       if (!c) { toast('Paste their friend code first.', 'bad'); return; }
-      call('AddFriend', c, f.nick ? f.nick.value.trim() : '').then(function () {
+      if (S.busy.friend) return;
+      busy('friend', call('AddFriend', c, f.nick ? f.nick.value.trim() : '')).then(function () {
         toast('Friend added. They have to add you too.', 'ok');
         S.tab = 'friends';
         go('home');
@@ -1044,9 +1208,21 @@
   document.addEventListener('keydown', function (ev) {
     var menu = $('#menu');
     if (ev.key === 'Escape') {
-      if (!menu.hidden) { closeMenu(); return; }
+      if (!menu.hidden) { closeMenu(true); return; }
       if ($('#dialog').open) return;
       if (S.mode === 'main' && S.view !== 'home') { go('home'); return; }
+    }
+    // Arrow keys move between tabs (WAI-ARIA tabs pattern).
+    if (ev.target.getAttribute && ev.target.getAttribute('role') === 'tab' && (ev.key === 'ArrowRight' || ev.key === 'ArrowLeft' || ev.key === 'Home' || ev.key === 'End')) {
+      var tabs = Array.prototype.slice.call(document.querySelectorAll('[role="tab"]'));
+      var ti = tabs.indexOf(ev.target);
+      var tn = ev.key === 'Home' ? 0 : ev.key === 'End' ? tabs.length - 1 : (ti + (ev.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length;
+      ev.preventDefault();
+      S.tab = tabs[tn].getAttribute('data-id');
+      S.detail = null;
+      render();
+      requestAnimationFrame(function () { var t = $('#tab-' + S.tab); if (t) t.focus(); });
+      return;
     }
     if (!menu.hidden && (ev.key === 'ArrowDown' || ev.key === 'ArrowUp')) {
       var items = Array.prototype.slice.call(menu.querySelectorAll('button'));
@@ -1106,7 +1282,12 @@
   $('#tb-min').addEventListener('click', function () { if (rt.WindowMinimise) rt.WindowMinimise(); });
   $('#tb-close').addEventListener('click', function () {
     if (S.mode === 'settings') { if (rt.Quit) rt.Quit(); return; }
-    if (rt.WindowHide) rt.WindowHide();
+    function hide() { if (rt.WindowHide) rt.WindowHide(); }
+    if (store.get('closed-once') || !S.service || !S.service.connected) { hide(); return; }
+    store.set('closed-once', '1');
+    confirmDialog({ title: 'Lanfolk keeps running', noCancel: true, ok: 'Got it',
+      text: 'You stay online so friends can reach you. Open Lanfolk again from its icon in the notification area (it may be behind the ^ arrow). To go offline, press the power button first.' })
+      .then(hide);
   });
   $('#titlebar').addEventListener('dblclick', function (ev) {
     if (!ev.target.closest('button') && rt.WindowToggleMaximise) rt.WindowToggleMaximise();
@@ -1118,11 +1299,23 @@
   on('service', function (s) {
     var was = S.service && S.service.connected;
     S.service = s;
+    if (s.connected) S.serviceSeen = true;
+    if (!s.connected && was) S.serviceLostAt = Date.now();
     if (!s.connected) { S.status = null; S.peers = []; }
     if (s.connected && !was && S.mode === 'settings') loadSettings();
     render();
   });
-  on('status', function (s) { S.status = s; render(); });
+  on('status', function (s) {
+    S.status = s;
+    var connecting = !!(activeNetwork() && !s.adapter_up && !s.adapter_error);
+    if (connecting && !S.connectingSince) {
+      S.connectingSince = Date.now();
+      setTimeout(render, CONNECT_HINT_AFTER + 100); // show the hint if it is still slow
+    }
+    if (!connecting) S.connectingSince = 0;
+    render();
+  });
+  on('update', function (u) { S.update = u; render(); });
   on('networks', function (n) {
     S.networks = n || [];
     if (S.detail && S.detail.indexOf('friend/') !== 0) {
@@ -1137,6 +1330,15 @@
   on('navigate', function (v) {
     if (!v || !S.service || !S.service.connected || S.mode !== 'main') return;
     if (v.view === 'invite' && v.network_id) go('invite', { network_id: v.network_id });
+  });
+
+  // The window may have been hidden or minimized: fetch fresh state when it
+  // comes back (the per-second peer updates pause while it is hidden).
+  var lastResync = 0;
+  window.addEventListener('focus', function () {
+    if (Date.now() - lastResync < 2000) return;
+    lastResync = Date.now();
+    call('Resync').catch(function () {});
   });
 
   call('Mode').then(function (m) { S.mode = m === 'settings' ? 'settings' : 'main'; }, function () { S.mode = 'main'; })

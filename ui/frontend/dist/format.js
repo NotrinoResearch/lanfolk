@@ -52,11 +52,13 @@
     return b ? { label: b.label, cls: b.cls } : { label: 'Unknown', cls: 'unknown' };
   }
 
+  // One vocabulary everywhere: the row says it short ("Relay"), the details
+  // say it in full ("Relay server").
   var PATHS = {
     direct: 'Direct',
-    'member-relay': 'Member relay',
-    'shared-relay': 'Shared relay',
-    'tcp-fallback': 'TCP fallback',
+    'member-relay': 'Via a member',
+    'shared-relay': 'Relay server',
+    'tcp-fallback': 'Relay server over TCP',
   };
 
   /** Connection path type shown to the user. */
@@ -71,6 +73,29 @@
     if (peer.path === 'member-relay' || peer.path === 'shared-relay') return 'via ' + d;
     if (peer.path === 'tcp-fallback') return 'via ' + d + ' (higher latency)';
     return '';
+  }
+
+  /**
+   * One sentence on what a connection's numbers mean and what helps, or ''
+   * when all is well. Plain words first (PRODUCT.md: state, not machinery).
+   */
+  function connectionAdvice(peer) {
+    if (!peer || !peer.online || !peer.path || peer.path === 'none') return '';
+    var q = String(peer.quality || '');
+    var relayed = peer.path !== 'direct';
+    if (q !== 'fair' && q !== 'poor') {
+      return relayed ? 'Works well through a relay. A direct connection would be a little faster.' : '';
+    }
+    if (isNum(peer.loss_pct) && peer.loss_pct > 2) {
+      return 'Packets are being lost. Wi-Fi or a busy connection on either side is the usual cause; a cable helps.';
+    }
+    if (isNum(peer.jitter_ms) && peer.jitter_ms > 30) {
+      return 'The delay jumps around. Downloads or streams on either connection are the usual cause.';
+    }
+    if (relayed) {
+      return 'Going through a relay adds delay. Turning on Automatic port mapping (Settings, Connection) on both computers often allows a direct connection.';
+    }
+    return 'The delay comes from the distance or the internet connections themselves; Lanfolk adds almost nothing.';
   }
 
   /** A shared relay's transport as shown in the status bar. */
@@ -121,10 +146,6 @@
     return 'Last seen ' + plural(days, 'day') + ' ago';
   }
 
-  function friendStateLabel(state) {
-    return state === 'active' ? 'Active' : 'Pending';
-  }
-
   /** Time left for a connection code. */
   function formatExpiry(iso, now) {
     var t = Date.parse(iso);
@@ -173,14 +194,6 @@
     };
   }
 
-  /** Online members first, then by nickname. */
-  function sortPeers(peers) {
-    return peers.slice().sort(function (a, b) {
-      if (!!a.online !== !!b.online) return a.online ? -1 : 1;
-      return String(a.nickname).localeCompare(String(b.nickname), undefined, { sensitivity: 'base' });
-    });
-  }
-
   /** Ping, jitter and loss only mean something for a connected member. */
   function isPeerMeasured(peer) {
     return !!peer.online && !!peer.path && peer.path !== 'none';
@@ -197,10 +210,73 @@
     });
   }
 
-  /** True when text looks like an invite code (lanfolk-i1...). */
+  var INVITE_RE = /lanfolk-i1[a-z0-9]{20,}/i;
+
+  /** True when text is an invite code (lanfolk-i1...) and nothing else. */
   function looksLikeInvite(text) {
     var s = String(text == null ? '' : text).trim();
-    return /^lanfolk-i1[a-z0-9]{20,}$/i.test(s);
+    return new RegExp('^' + INVITE_RE.source + '$', 'i').test(s);
+  }
+
+  /**
+   * The invite code inside a pasted text (a whole chat message with the
+   * download link, for example), or '' when there is none.
+   */
+  function extractInvite(text) {
+    var m = String(text == null ? '' : text).match(INVITE_RE);
+    return m ? m[0] : '';
+  }
+
+  /** The text "Copy invite" puts on the clipboard: ready to send in a chat. */
+  function inviteMessage(code, networkName, downloadURL) {
+    return 'Join my Lanfolk network "' + networkName + '".\n' +
+      'No Lanfolk yet? Install it from ' + downloadURL + '\n' +
+      'Then choose Join network and paste this whole message:\n' + code;
+  }
+
+  function parseVersion(v) {
+    var m = /^v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+.*)?$/.exec(String(v == null ? '' : v).trim());
+    if (!m) return null;
+    return { n: [+m[1], +m[2], +m[3]], pre: m[4] || '' };
+  }
+
+  /**
+   * Compares release versions ("0.3.0", "v0.3.1-rc.1"): -1, 0 or 1. An
+   * unparsable or empty version sorts first (releases before 0.3.0 send none).
+   */
+  function compareVersions(a, b) {
+    var pa = parseVersion(a);
+    var pb = parseVersion(b);
+    if (!pa || !pb) return !pa && !pb ? 0 : !pa ? -1 : 1;
+    for (var i = 0; i < 3; i++) {
+      if (pa.n[i] !== pb.n[i]) return pa.n[i] < pb.n[i] ? -1 : 1;
+    }
+    if (pa.pre === pb.pre) return 0;
+    if (!pa.pre) return 1;
+    if (!pb.pre) return -1;
+    // SemVer 2.0: dot-separated identifiers, numbers numerically and first.
+    var ia = pa.pre.split('.');
+    var ib = pb.pre.split('.');
+    for (var j = 0; j < ia.length && j < ib.length; j++) {
+      if (ia[j] === ib[j]) continue;
+      var na = /^\d+$/.test(ia[j]);
+      var nb = /^\d+$/.test(ib[j]);
+      if (na && nb) return +ia[j] < +ib[j] ? -1 : 1;
+      if (na !== nb) return na ? -1 : 1;
+      return ia[j] < ib[j] ? -1 : 1;
+    }
+    return ia.length === ib.length ? 0 : ia.length < ib.length ? -1 : 1;
+  }
+
+  /**
+   * How a member's Lanfolk compares with ours: 'older', 'newer' or ''.
+   * A member that sends no version runs a release before 0.3.0. A dev build
+   * compares with nothing.
+   */
+  function versionRelation(theirs, ours) {
+    if (!parseVersion(ours) || String(ours).indexOf('dev') >= 0) return '';
+    var c = compareVersions(theirs, ours);
+    return c < 0 ? 'older' : c > 0 ? 'newer' : '';
   }
 
   /** "Works for 7 more days" for an invite's expiry time. */
@@ -223,12 +299,20 @@
     'tcp-fallback': 'Relay (TCP)',
   };
 
-  /** What a member row shows on the right: latency and how we reach them. */
+  /**
+   * What a member row shows on the right: the average ping (steadier than
+   * the latest), how we reach them and, when it is not good, the quality.
+   * state is the dot: online, fair, poor, connecting or offline.
+   */
   function memberSummary(peer) {
     if (!peer || !peer.online) return { text: 'Offline', sub: '', state: 'offline' };
     if (!peer.path || peer.path === 'none') return { text: 'Connecting…', sub: '', state: 'connecting' };
     var sub = peer.path === 'member-relay' ? (peer.relay_detail ? 'Via ' + peer.relay_detail : 'Via a member') : SHORT_PATHS[peer.path] || '';
-    return { text: formatMs(peer.ping_ms), sub: sub, state: 'online' };
+    var q = String(peer.quality || '');
+    var state = q === 'fair' || q === 'poor' ? q : 'online';
+    if (state !== 'online') sub += ' · ' + QUALITY[q].label;
+    var ms = isNum(peer.avg_ping_ms) && peer.avg_ping_ms > 0 ? peer.avg_ping_ms : peer.ping_ms;
+    return { text: formatMs(ms), sub: sub, state: state };
   }
 
   /** Progress text of an invite the user redeemed. */
@@ -241,7 +325,7 @@
       case 'joined':
         return 'Joined';
       case 'expired':
-        return 'The invite expired';
+        return 'The invite expired. Ask for a new one.';
       default:
         return '';
     }
@@ -273,6 +357,11 @@
 
   return {
     looksLikeInvite: looksLikeInvite,
+    extractInvite: extractInvite,
+    inviteMessage: inviteMessage,
+    compareVersions: compareVersions,
+    versionRelation: versionRelation,
+    connectionAdvice: connectionAdvice,
     inviteValidity: inviteValidity,
     memberSummary: memberSummary,
     joinStateText: joinStateText,
@@ -288,13 +377,11 @@
     dhtLabel: dhtLabel,
     isZeroTime: isZeroTime,
     friendPresence: friendPresence,
-    friendStateLabel: friendStateLabel,
     formatExpiry: formatExpiry,
     formatRelay: formatRelay,
     validatePort: validatePort,
     validateRelay: validateRelay,
     relayFromForm: relayFromForm,
-    sortPeers: sortPeers,
     isPeerMeasured: isPeerMeasured,
     addableFriends: addableFriends,
   };

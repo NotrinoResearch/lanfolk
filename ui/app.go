@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"strings"
 	"sync"
@@ -58,6 +59,12 @@ type App struct {
 
 	wake chan struct{} // Retry wakes the connection loop
 
+	// Update check (update.go); the main window's process runs it.
+	httpClient  *http.Client
+	updateURL   string
+	updateFirst time.Duration
+	update      *UpdateInfo
+
 	cancel context.CancelFunc
 	done   chan struct{}
 }
@@ -71,6 +78,9 @@ func NewApp(addr string, host Host) *App {
 		backoffMax:  5 * time.Second,
 		callTimeout: defaultCallTimeout,
 		wake:        make(chan struct{}, 1),
+		httpClient:  &http.Client{Timeout: updateTimeout},
+		updateURL:   releasesAPI,
+		updateFirst: updateFirstDelay,
 	}
 }
 
@@ -78,10 +88,14 @@ func NewApp(addr string, host Host) *App {
 func (a *App) start(ctx context.Context) {
 	ctx, a.cancel = context.WithCancel(ctx)
 	a.done = make(chan struct{})
-	go func() {
-		defer close(a.done)
-		a.run(ctx)
-	}()
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() { defer wg.Done(); a.run(ctx) }()
+	if a.mode == "main" {
+		wg.Add(1)
+		go func() { defer wg.Done(); a.updateLoop(ctx) }()
+	}
+	go func() { wg.Wait(); close(a.done) }()
 }
 
 // stop ends the connection loop and closes the connection.
@@ -178,6 +192,9 @@ func (a *App) Resync() {
 		return
 	}
 	a.host.Emit(eventService, s)
+	if u, ok := a.lastUpdate(); ok {
+		a.host.Emit(eventUpdate, u)
+	}
 	if c != nil {
 		go a.snapshot(context.Background(), c)
 	}

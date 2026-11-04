@@ -27,7 +27,7 @@ type UserError struct {
 func (e *UserError) Error() string { return e.Message }
 
 var (
-	errNotRunning     = &UserError{Code: CodeNotRunning, Message: "The Lanfolk service is not running. Start it and try again."}
+	errNotRunning     = &UserError{Code: CodeNotRunning, Message: "The Lanfolk service is not running. It starts with Windows; if it does not come back, restart the computer."}
 	errWindowNotReady = &UserError{Code: CodeLocal, Message: "The window is not ready yet. Try again in a moment."}
 )
 
@@ -47,7 +47,7 @@ func userError(err error) error {
 	if errors.Is(err, context.DeadlineExceeded) {
 		return &UserError{Code: CodeTimeout, Message: "The Lanfolk service did not answer in time. Try again."}
 	}
-	return &UserError{Code: CodeNotRunning, Message: "Lost the connection to the Lanfolk service. Reconnecting..."}
+	return &UserError{Code: CodeNotRunning, Message: "Lost the connection to the Lanfolk service. Reconnecting…"}
 }
 
 // userMessage returns readable text for an error returned by the service.

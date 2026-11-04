@@ -41,9 +41,9 @@ test('qualityBadge', () => {
 
 test('pathLabel', () => {
   assert.equal(F.pathLabel('direct'), 'Direct');
-  assert.equal(F.pathLabel('member-relay'), 'Member relay');
-  assert.equal(F.pathLabel('shared-relay'), 'Shared relay');
-  assert.equal(F.pathLabel('tcp-fallback'), 'TCP fallback');
+  assert.equal(F.pathLabel('member-relay'), 'Via a member');
+  assert.equal(F.pathLabel('shared-relay'), 'Relay server');
+  assert.equal(F.pathLabel('tcp-fallback'), 'Relay server over TCP');
   assert.equal(F.pathLabel('none'), 'Not connected');
   assert.equal(F.pathLabel(''), 'Not connected');
   assert.equal(F.pathLabel('something-new'), 'Not connected');
@@ -83,12 +83,6 @@ test('friendPresence', () => {
   assert.equal(F.friendPresence({ online: false, last_seen_at: '2026-01-09T10:00:00Z' }, now), 'Last seen 1 day ago');
 });
 
-test('friendStateLabel', () => {
-  assert.equal(F.friendStateLabel('active'), 'Active');
-  assert.equal(F.friendStateLabel('pending'), 'Pending');
-  assert.equal(F.friendStateLabel('zzz'), 'Pending');
-});
-
 test('formatExpiry', () => {
   const now = Date.parse('2026-01-10T12:00:00Z');
   assert.equal(F.formatExpiry('2026-01-10T12:04:12Z', now), 'Expires in 4 min 12 s');
@@ -113,16 +107,6 @@ test('relay formatting and validation', () => {
   assert.equal(F.validateRelay({ host: 'r.example', udp: '3478', tcp: '0' }), 'TCP port: Enter a port between 1 and 65535.');
   assert.equal(F.validateRelay({ host: 'r.example', udp: '3478', tcp: '443' }), '');
   assert.deepEqual(F.relayFromForm({ host: ' r.example ', udp: '3478', tcp: '443' }), { host: 'r.example', udp_port: 3478, tcp_port: 443 });
-});
-
-test('sortPeers puts online members first, then by name', () => {
-  const sorted = F.sortPeers([
-    { nickname: 'zed', online: true },
-    { nickname: 'Bob', online: false },
-    { nickname: 'amy', online: true },
-    { nickname: 'Al', online: false },
-  ]);
-  assert.deepEqual(sorted.map((p) => p.nickname), ['amy', 'zed', 'Al', 'Bob']);
 });
 
 test('isPeerMeasured: only online peers with a path have numbers', () => {
@@ -176,6 +160,53 @@ test('memberSummary', () => {
   assert.deepEqual(F.memberSummary({ online: true, path: 'none' }), { text: 'Connecting…', sub: '', state: 'connecting' });
   assert.deepEqual(F.memberSummary({ online: false, path: 'none' }), { text: 'Offline', sub: '', state: 'offline' });
   assert.deepEqual(F.memberSummary(undefined), { text: 'Offline', sub: '', state: 'offline' });
+  // The row shows the steadier average when there is one, and says so when
+  // the quality is not good.
+  assert.deepEqual(F.memberSummary({ online: true, path: 'direct', ping_ms: 30, avg_ping_ms: 24.6, quality: 'good' }), { text: '25 ms', sub: 'Direct', state: 'online' });
+  assert.deepEqual(F.memberSummary({ online: true, path: 'direct', ping_ms: 90, avg_ping_ms: 85, quality: 'fair' }), { text: '85 ms', sub: 'Direct · Fair', state: 'fair' });
+  assert.deepEqual(F.memberSummary({ online: true, path: 'shared-relay', ping_ms: 150, avg_ping_ms: 131.4, quality: 'poor' }), { text: '131 ms', sub: 'Relay · Poor', state: 'poor' });
+});
+
+test('extractInvite finds the code in a chat message', () => {
+  const code = 'lanfolk-i1' + 'k'.repeat(40);
+  assert.equal(F.extractInvite(code), code);
+  assert.equal(F.extractInvite(F.inviteMessage(code, 'Friday games', 'https://example.org/dl')), code);
+  assert.equal(F.extractInvite('Mehmet: here you go ' + code + ' have fun'), code);
+  assert.equal(F.extractInvite('lanfolk-i1short'), '');
+  assert.equal(F.extractInvite(null), '');
+  assert.equal(F.looksLikeInvite(F.inviteMessage(code, 'x', 'https://e')), false);
+});
+
+test('inviteMessage names the network and the download page', () => {
+  const m = F.inviteMessage('lanfolk-i1abc', 'Friday games', 'https://example.org/dl');
+  assert.match(m, /"Friday games"/);
+  assert.match(m, /https:\/\/example\.org\/dl/);
+  assert.ok(m.endsWith('lanfolk-i1abc'));
+});
+
+test('compareVersions and versionRelation', () => {
+  const order = ['', '0.2.0-alpha', '0.2.0-alpha.1', '0.2.0-beta.2', '0.2.0-beta.11', '0.2.0-rc.1', '0.2.0', 'v0.2.1', '0.10.0', '1.0.0'];
+  for (let i = 0; i < order.length; i++) {
+    for (let j = 0; j < order.length; j++) {
+      assert.equal(F.compareVersions(order[i], order[j]), Math.sign(i - j), order[i] + ' vs ' + order[j]);
+    }
+  }
+  assert.equal(F.versionRelation('', '0.3.0'), 'older');
+  assert.equal(F.versionRelation('0.2.9', '0.3.0'), 'older');
+  assert.equal(F.versionRelation('0.3.0', '0.3.0'), '');
+  assert.equal(F.versionRelation('0.3.1', '0.3.0'), 'newer');
+  assert.equal(F.versionRelation('0.3.1', '0.0.0-dev'), '');
+  assert.equal(F.versionRelation('0.3.1', ''), '');
+});
+
+test('connectionAdvice', () => {
+  assert.equal(F.connectionAdvice({ online: true, path: 'direct', quality: 'good' }), '');
+  assert.equal(F.connectionAdvice({ online: false, path: 'direct', quality: 'poor' }), '');
+  assert.match(F.connectionAdvice({ online: true, path: 'shared-relay', quality: 'good' }), /relay/);
+  assert.match(F.connectionAdvice({ online: true, path: 'direct', quality: 'poor', loss_pct: 5 }), /lost/);
+  assert.match(F.connectionAdvice({ online: true, path: 'direct', quality: 'fair', jitter_ms: 40 }), /jumps/);
+  assert.match(F.connectionAdvice({ online: true, path: 'shared-relay', quality: 'poor', loss_pct: 0, jitter_ms: 3 }), /port mapping/);
+  assert.match(F.connectionAdvice({ online: true, path: 'direct', quality: 'poor', loss_pct: 0, jitter_ms: 3 }), /distance/);
 });
 
 test('joinStateText', () => {
@@ -183,7 +214,7 @@ test('joinStateText', () => {
   assert.equal(F.joinStateText({ state: 'waiting' }), 'Waiting for the owner to come online…');
   assert.equal(F.joinStateText({ state: 'joining' }), 'Joining…');
   assert.equal(F.joinStateText({ state: 'joined' }), 'Joined');
-  assert.equal(F.joinStateText({ state: 'expired' }), 'The invite expired');
+  assert.equal(F.joinStateText({ state: 'expired' }), 'The invite expired. Ask for a new one.');
 });
 
 test('onlineCount counts you when you are connected', () => {

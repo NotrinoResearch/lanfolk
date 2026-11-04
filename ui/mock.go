@@ -71,7 +71,7 @@ func newMockService() *mockService {
 		nickname: "Ahmet",
 		pending:  map[string]time.Time{},
 		settings: ipc.Settings{
-			PortMapping: true, DHTFallback: true,
+			PortMapping: true, DHTFallback: true, Notifications: true, CheckUpdates: true,
 			CustomRelays: []ipc.Relay{},
 			DefaultRelay: "relay.example.net:3478 (UDP) / 443 (TCP)",
 		},
@@ -121,7 +121,7 @@ func (m *mockService) active() *ipc.Network {
 func (m *mockService) status() ipc.Status {
 	up := time.Since(m.started)
 	st := ipc.Status{
-		Version: "0.0.0-mock", Nickname: m.nickname, PublicKey: mockSelfKey,
+		Version: "0.3.0", Nickname: m.nickname, PublicKey: mockSelfKey,
 		FriendCode: mockCode("ahmet"), ListenPort: 41641, PortMapping: "upnp", DHT: "standby",
 		AdapterUp: true, RelayOnly: m.settings.RelayOnly, CompatMode: m.settings.CompatMode,
 		Relays: []ipc.RelayStatus{{Name: "relay.example.net:3478", Source: "default", Mode: "udp", RTTMs: 24 + rand.Float64()*3}},
@@ -194,7 +194,9 @@ func (m *mockService) peers() []ipc.Peer {
 		if mem.IsSelf {
 			continue
 		}
-		p := ipc.Peer{PublicKey: mem.PublicKey, Nickname: mem.Nickname, VirtualIP: mem.VirtualIP, Path: "none", Quality: "unknown"}
+		// Versions: same as ours, older (none sent), same, newer.
+		p := ipc.Peer{PublicKey: mem.PublicKey, Nickname: mem.Nickname, VirtualIP: mem.VirtualIP, Path: "none", Quality: "unknown",
+			Version: []string{"0.3.0", "", "0.3.0", "0.3.1"}[i%4]}
 		if f := m.friendByKey(mem.PublicKey); f != nil {
 			p.Online = f.Online
 		} else {
