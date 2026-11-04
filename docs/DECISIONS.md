@@ -501,3 +501,74 @@ would also hide the clients' real addresses that hole punching needs.
 - The 0.2.0 release had the address built in; it was withdrawn and replaced
   by 0.2.1. The address was never in the git history.
 - Naming further relays `lanfolk-relayN.notrino.com` keeps room for more.
+
+## D-030 Path selection: only fresh paths take over, with hysteresis
+
+Date: 2026-11-04. The first test between two homes (0.2.1) logged about
+18,000 direct/relay switches in 30 minutes, one every 50 ms tick, while the
+direct path answered in 32 ms and the relay in 158 ms.
+
+**Cause**: a standby path counts as alive for 16 s, the active one for 2 s.
+A standby direct path whose last reply was 2-16 s old was selected, was dead
+at once as the active path, fell back to the relay and was selected again on
+the next tick. The engine also reported the time of the last WireGuard packet
+on every tick and that overwrote newer probe replies, which kept the direct
+path in that window.
+
+**Rules now** (`internal/pathmgr`):
+
+- Received times only move forward (`OnInbound`).
+- A path may replace a working active path only if it answered within
+  `DeadAfter` (2 s). When the active path is dead, any path that is alive
+  under the standby rule may take over (fast failover).
+- A newly active path gets `DeadAfter` from its activation to answer.
+- A path that failed needs a new reply before it is used again.
+- One score for all paths: RTT, plus `DirectPreference` (5 ms) for relays,
+  plus `TCPPenalty` for TCP. Leaving a working path needs a gain of
+  `Hysteresis` (2 ms), except from a relay to a direct path, so the old rule
+  "direct unless a relay is 5 ms faster" holds exactly.
+
+Not done: an idle mode that probes less without game traffic. Probing the
+active path twice a second keeps NAT mappings open and the numbers current,
+which matters more for games than the few packets it costs.
+
+## D-031 Nothing slow runs on the packet path or the engine loop
+
+Date: 2026-11-04, from an independent performance review.
+
+- Bookkeeping writes (last seen, path cache) go through
+  `store.UpdateLater`: applied to the file in one write within 5 s, never
+  blocking. They were saved with fsync on the socket read goroutine (4-8 ms
+  of delayed packets per friend per minute).
+- Interface addresses are read with one `GetAdaptersAddresses` call (1 ms
+  instead of 46 ms) on their own goroutine, at start, on Windows address and
+  interface change notifications and every 30 s. Candidates are collected
+  every second from the cache, so a new STUN mapping is announced within 1 s.
+- The path tick takes no engine lock and allocates nothing in the common
+  case; statistics are computed once a second; with no active network the
+  tick runs once a second.
+- IPC events go through a per-client writer with one pending snapshot per
+  event; a UI that stops reading can no longer stop the engine loop. Events
+  are not built when nobody listens, and the desktop app does not render the
+  per-second peer list while its window is hidden.
+
+## D-032 Update check and notifications live in the desktop app
+
+Date: 2026-11-04.
+
+- The desktop app, not the service, checks for updates: once a day it asks
+  the GitHub releases API for the list of releases (generic User-Agent,
+  nothing else sent). Settings > General turns it off; About can check by
+  hand. Pre-releases count while the app is 0.x or a pre-release. Lanfolk
+  does not download or install anything itself: without code signing an
+  automatic installer would only add SmartScreen prompts. The installer
+  upgrades in place and keeps `C:\ProgramData\Lanfolk`.
+- Windows notifications use the tray icon's NIF_INFO (fyne.io/systray has no
+  notification API), without sound and with quiet time respected; Windows
+  holds them back during full-screen games. They announce changes only: a
+  member back after 2 minutes or more, a new member in a network you own, a
+  join you started finishing, a new release once. On by default (PRODUCT.md
+  principle 4), off in Settings > General.
+- Hello carries the sender's release as an optional trailing field (since
+  0.3.0; 0.2 ignores it), so the app can say "Older Lanfolk" on a member and
+  suggest updating when a member is newer.

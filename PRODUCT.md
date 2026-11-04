@@ -33,8 +33,8 @@ Source available (PolyForm Noncommercial 1.0.0, free for personal use; commercia
 
 - The UI is a client of the Lanfolk Windows service over a local named pipe; it stores no data itself. Without the service it can only show that the service is unreachable.
 - Concepts: nickname; network (name, owner, members with virtual IPs 10.77.0.x); active network; invite code (one paste to join; the owner must be online when it is used); per-member connection state (direct, member relay, shared relay, TCP fallback; ping, quality good/fair/poor).
-- Friends exist in the engine (needed for invites and mutual trust) but are not shown on the main screen; they are listed under Settings, Advanced.
-- Settings: nickname, start with Windows, compatibility mode, relay only, port mapping, DHT fallback, manual port, custom relays, identity backup/restore, diagnostics export, about/licenses.
+- Friends (needed for invites and mutual trust) have their own tab next to Networks in the main window (D-027).
+- Settings: nickname, start with Windows, compatibility mode, notifications, update check, relay only, port mapping, DHT fallback, manual port, custom relays, identity backup/restore, diagnostics export, about/licenses.
 - UI language: English only for now (decision 2026-11-04). Strings should stay easy to extract later.
 - Window is compact (Hamachi-like) and lives in the tray: closing hides it; the tray menu can open it, switch the active network, go offline and quit the UI.
 

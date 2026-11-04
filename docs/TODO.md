@@ -30,6 +30,18 @@ Last updated: 4 November 2026.
 - [ ] Closed beta with at least 10 people on at least 4 providers, including
       one mobile line (section 6).
 
+## Release 0.3.0
+
+- [ ] Repeat the two-home test from 4 November (0.2.1) with 0.3.0 on both
+      sides: the log should show one `path selected` line per real change,
+      not one every 50 ms (D-030), and renamed members should show their new
+      name.
+- [ ] Check that Windows shows the notifications (a member coming online, an
+      update) on a machine with Focus Assist off and that a full-screen game
+      holds them back.
+- [ ] Upgrade 0.2.1 to 0.3.0 over the top on a machine with a network and
+      friends; everything must still be there.
+
 ## Installer
 
 - [ ] Install, upgrade and uninstall on a clean Windows 10 (64-bit). Only
@@ -72,7 +84,8 @@ Last updated: 4 November 2026.
 
 ## Product ideas, not planned yet
 
-- [ ] A notification when someone joins your network or comes online.
+- [x] A notification when someone joins your network or comes online
+      (D-032).
 - [ ] Turkish translation of the app and the installer.
 - [ ] Joining with an invite while the network owner is offline (D-025).
 - [ ] Mica window background on Windows 11.
