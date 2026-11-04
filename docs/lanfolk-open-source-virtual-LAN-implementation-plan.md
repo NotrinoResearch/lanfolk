@@ -385,7 +385,7 @@ Read this file to connect to the VPS and deploy the relay. Use `ip` as `RELAY_PU
 - [x] Build `natprobe`: external port behavior, filtering, NAT timeout, IPv6 and DHT access
   - *Deviation (D-018):* filtering behavior is not measured, because the relay answers from a single address.
 - [x] Build `lanprobe`: unicast, subnet broadcast, global broadcast and multicast
-  - It also checks IP in payload, the private range and the blocked SMB/RDP ports, and `lanprobe latency -compare` measures tunnel overhead. Verified on one machine; the two-machine run waits for the client.
+  - It also checks IP in payload, the private range and the blocked SMB/RDP ports, and `lanprobe latency -compare` measures tunnel overhead. Run between two Windows machines (the development machine and a clean Windows Sandbox) on 2026-11-04: every core behavior passes (MEASUREMENTS.md).
 - [x] Test broadcast and multicast send and receive through Wintun
   - Ran elevated on 2026-11-04 (Windows 11 26300, Wintun 0.14): every send and receive case works with the normal metric except a global broadcast from a socket bound to 0.0.0.0, which needs metric 1 (compatibility mode). Table in MEASUREMENTS.md.
 - [ ] Verify plain WireGuard traffic can pass through test lines
@@ -402,7 +402,7 @@ Read this file to connect to the VPS and deploy the relay. Use `ip` as `RELAY_PU
 - [x] Connect two manually configured clients
   - Verified with friend codes and a network instead of hand-written configs: engine tests with in-memory adapters, and the real binaries with `lanfolk-cli` on one machine.
 - [x] Build the overhead measurement tool
-  - `lanprobe latency -compare` for real machines; `TestTunnelOverhead` for the software part: 0.10 ms p50 and 0.61 ms p99 overhead on one machine (MEASUREMENTS.md).
+  - `lanprobe latency -compare` for real machines; `TestTunnelOverhead` for the software part: 0.10 ms p50 and 0.61 ms p99 overhead on one machine. Between two Windows machines with real Wintun adapters: +0.66 ms p50 and +1.57 ms p99, within the target (MEASUREMENTS.md).
 
 **Gate:** Virtual IP ping works and direct-path overhead meets the target.
 
@@ -506,12 +506,12 @@ Read this file to connect to the VPS and deploy the relay. Use `ip` as `RELAY_PU
 - [x] Implement compatibility mode and metric restoration
   - Verified on real Windows 11: metric 9000 (automatic metric off), 1 with compatibility mode, back to 9000 when it is turned off.
 - [x] Configure Private profile and firewall rule for the adapter
-  - Verified on real Windows 11: profile Private, exactly the 6 rules of group `Lanfolk`. SMB/RDP reachability from a second machine is still to be checked (Phase 7 two-machine test).
+  - Verified on real Windows 11: profile Private, exactly the 6 rules of group `Lanfolk`; SMB, RDP and WinRM are unreachable from a second machine.
   - *Deviation (D-016):* the allow rule also covers 255.255.255.255 and 224.0.0.0/4 as local addresses.
 - [x] Add the denylist port filter
-  - Enforced inside the tunnel in both directions (tested) and by firewall rules (needs an elevated run).
+  - Enforced inside the tunnel in both directions (tested) and by firewall rules; verified between two Windows machines: 135, 139, 445, 3389, 5985 and 5986 are unreachable.
 - [x] Complete the `lanprobe` test suite
-  - The two-machine run is part of the human test below.
+  - Two-machine run done on 2026-11-04 (development machine and Windows Sandbox): all core behaviors pass, with compatibility mode also the informational ones.
 - [ ] `[Human]` Test real games from different LAN behavior classes across two homes
 
 **Gate:** `lanprobe` passes every supported behavior and real games show matching results.
@@ -526,8 +526,8 @@ Read this file to connect to the VPS and deploy the relay. Use `ip` as `RELAY_PU
 - [x] Add settings: Relay only, compatibility mode, manual port and relay address
   - *Deviation (D-015):* custom relays are a list, and the DHT fallback and port mapping are switches too.
 - [x] Add diagnostic report export
-- [ ] Build the Windows installer, service registration and uninstaller
-  - The Inno Setup script (`installer/lanfolk.iss`, D-026, replaces the NSIS script of D-022) builds `Lanfolk-0.2.0-setup.exe`. On the development machine it upgraded the 0.1.0 NSIS install, uninstalled (keeping data) and reinstalled with the identity kept (MEASUREMENTS.md). Not yet run on a clean Windows VM (Windows Sandbox is being enabled for that).
+- [x] Build the Windows installer, service registration and uninstaller
+  - The Inno Setup script (`installer/lanfolk.iss`, D-026, replaces the NSIS script of D-022) builds `Lanfolk-0.2.0-setup.exe`. On a clean Windows 11 (Windows Sandbox) it installs, joins a network by invite and uninstalls without residue; on the development machine it upgraded the 0.1.0 NSIS install with the identity kept (MEASUREMENTS.md). Windows 10 is not tested yet.
 
 **Gate:** On clean Windows, setup, adding friends, creating a network and uninstalling all work.
 

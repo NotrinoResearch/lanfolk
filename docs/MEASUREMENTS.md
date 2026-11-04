@@ -76,7 +76,24 @@ multicast works with the normal metric.
 | Firewall | exactly 6 enabled rules in group `Lanfolk` with the expected names |
 | `go test ./internal/winnet/` elevated | 49 passed, 1 skipped, 0 failed |
 
-Not run: SMB/RDP reachability from a second machine (needs two machines).
+SMB/RDP reachability from a second machine: blocked (see "LAN behaviors
+between two machines").
+
+### Installer on a clean Windows 11 (TESTING.md section 7)
+
+2026-11-04, `Lanfolk-0.2.0-setup.exe` in Windows Sandbox (Windows 11
+Enterprise 26100, a fresh image each start), silent mode:
+
+| Step | Result |
+| --- | --- |
+| Install | exit 0 in 12 s; service running and automatic; files in `C:\Program Files\Lanfolk`; 6 firewall rules; Apps entry "Lanfolk 0.2.0 / Lanfolk contributors"; Start Menu shortcut; PATH entry; `C:\ProgramData\Lanfolk` created; relay reachable |
+| Join a network | invite code from A redeemed with `lanfolk-cli join`; joined in 10 s; Wintun adapter up with 10.77.0.3 |
+| Uninstall while the app is open | the app was closed; service, adapter, firewall rules, program folder, PATH entry, Start Menu shortcut, Run value and Apps entry removed; nothing pending a restart; data folder kept |
+| Install again | identity (friend code) unchanged |
+
+Not covered: Windows 10, the interactive wizard (only its first page was
+seen), "Yes" to deleting the data (the silent default is No), and a reboot
+of the clean machine (Windows Sandbox cannot reboot).
 
 ### Installer (TESTING.md section 7, on the development machine)
 
@@ -94,7 +111,26 @@ uninstall and reinstall on a used machine.
 
 ## LAN behaviors between two machines (Phase 7, `lanprobe test`)
 
-_Not run yet: needs two machines on a Lanfolk network._
+2026-11-04, Lanfolk 0.2.0. A: Windows 11 Pro 26300 (the development machine,
+10.77.0.2). B: a clean Windows 11 Enterprise 26100 in Windows Sandbox
+(10.77.0.3), behind the Hyper-V NAT of A, so the two have separate NATs and
+separate Wintun adapters. B joined A's network with an invite code in 10 s;
+the path went direct (0.7 ms). `lanprobe serve` on B, `lanprobe test` on A.
+Windows asked once on B to allow `lanprobe` through the firewall.
+
+| Setup | TCP | UDP | Subnet bcast | Global bcast (bound) | Global bcast (0.0.0.0) | Mcast (IF set) | Mcast (default) | IP in payload | Private range | Blocked ports |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| A to B, direct, compat off | PASS | PASS | PASS | PASS | FAIL (informational) | PASS | FAIL (informational) | PASS | PASS | PASS |
+| A to B, direct, compat on | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS | PASS |
+
+Blocked ports: 135, 139, 445, 3389, 5985 and 5986 were all unreachable through
+the tunnel. The two informational failures match the Wintun self-test: a
+socket bound to 0.0.0.0 sends global broadcast and default-interface
+multicast out of the lowest-metric adapter, which is Lanfolk only in
+compatibility mode.
+
+Not covered yet: B to A (B's `lanprobe test`), two physical machines on
+different ISPs, and a relayed path.
 
 ## Tunnel overhead (Phase 1, `lanprobe latency -compare`)
 
@@ -110,7 +146,18 @@ the Wintun driver and the network, so the real-hardware run with
 | --- | --- | --- | --- | --- | --- |
 | 2026-11-04 | Windows 11, i7-13700H, loopback, direct path | 0.095 / 0.312 ms | 0.195 / 0.919 ms | 0.100 / 0.606 ms | 0 of 10,000 |
 
-_Real two-machine run: not run yet._
+Two Windows machines with real Wintun adapters (A and B as in the section
+above, direct path over the Hyper-V NAT), `lanprobe latency -peer 10.77.0.3
+-compare 172.27.93.75 -count 10000 -size 200 -rate 64`:
+
+| Date | Setup | Raw p50 / p99 | Tunnel p50 / p99 | Overhead p50 / p99 | Lost |
+| --- | --- | --- | --- | --- | --- |
+| 2026-11-04 | A (Windows 11 26300) to B (Windows Sandbox, Windows 11 26100), direct path | 0.630 / 1.915 ms | 1.292 / 3.481 ms | **+0.662 / +1.567 ms** (target 1 / 3 ms: pass) | 0 of 10,000 (both) |
+
+The raw path is between a host and a VM on one computer, so it is much
+shorter than any internet path; the overhead is what Lanfolk adds on top of
+the path (WireGuard, the Wintun driver on both sides, the bind and the LAN
+layer).
 
 ## Relay load (Phase 9)
 

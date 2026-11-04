@@ -43,7 +43,7 @@ Goal: check that unicast, subnet and global broadcast, multicast, IP-in-payload,
 
 You need two Windows machines (A and B) in the same Lanfolk network (or, for a first check, on one physical LAN).
 
-On machine B (the server). Allow the ports it lists in Windows Firewall for the `Lanfolk` adapter:
+On machine B (the server). Allow the ports it lists in Windows Firewall for the `Lanfolk` adapter. The first start of `lanprobe serve` makes Windows ask whether to allow `lanprobe`; allow it (private networks are enough):
 
 ```powershell
 .\lanprobe.exe serve -iface-ip 10.77.0.3
