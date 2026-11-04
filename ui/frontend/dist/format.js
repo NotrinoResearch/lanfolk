@@ -197,7 +197,87 @@
     });
   }
 
+  /** True when text looks like an invite code (lanfolk-i1...). */
+  function looksLikeInvite(text) {
+    var s = String(text == null ? '' : text).trim();
+    return /^lanfolk-i1[a-z0-9]{20,}$/i.test(s);
+  }
+
+  /** "Works for 7 more days" for an invite's expiry time. */
+  function inviteValidity(iso, now) {
+    var t = Date.parse(iso);
+    if (!isFinite(t)) return '';
+    var secs = (t - now) / 1000;
+    if (secs <= 0) return 'Expired';
+    var hours = Math.floor(secs / 3600);
+    if (hours < 1) return 'Works for less than an hour';
+    if (hours < 24) return 'Works for ' + hours + (hours === 1 ? ' more hour' : ' more hours');
+    // Round so a fresh 7-day code reads "7 more days", not 6.
+    var days = Math.max(1, Math.round(hours / 24));
+    return 'Works for ' + days + (days === 1 ? ' more day' : ' more days');
+  }
+
+  var SHORT_PATHS = {
+    direct: 'Direct',
+    'shared-relay': 'Relay',
+    'tcp-fallback': 'Relay (TCP)',
+  };
+
+  /** What a member row shows on the right: latency and how we reach them. */
+  function memberSummary(peer) {
+    if (!peer || !peer.online) return { text: 'Offline', sub: '', state: 'offline' };
+    if (!peer.path || peer.path === 'none') return { text: 'Connecting…', sub: '', state: 'connecting' };
+    var sub = peer.path === 'member-relay' ? (peer.relay_detail ? 'Via ' + peer.relay_detail : 'Via a member') : SHORT_PATHS[peer.path] || '';
+    return { text: formatMs(peer.ping_ms), sub: sub, state: 'online' };
+  }
+
+  /** Progress text of an invite the user redeemed. */
+  function joinStateText(join) {
+    switch (join && join.state) {
+      case 'waiting':
+        return 'Waiting for ' + (join.owner_nickname || 'the owner') + ' to come online…';
+      case 'joining':
+        return 'Joining…';
+      case 'joined':
+        return 'Joined';
+      case 'expired':
+        return 'The invite expired';
+      default:
+        return '';
+    }
+  }
+
+  /** Members other than you, and how many of them are online. */
+  function onlineCount(network, peers) {
+    var online = {};
+    (peers || []).forEach(function (p) {
+      if (p.online) online[p.public_key] = true;
+    });
+    var others = 0;
+    var on = 0;
+    ((network && network.members) || []).forEach(function (m) {
+      if (m.is_self) return;
+      others++;
+      if (online[m.public_key]) on++;
+    });
+    return { online: on, others: others };
+  }
+
+  /** Suggested name for a new network. */
+  function defaultNetworkName(nick) {
+    var n = String(nick || '').trim();
+    if (!n) return 'My network';
+    var suffix = "'s network";
+    return n.slice(0, 32 - suffix.length) + suffix;
+  }
+
   return {
+    looksLikeInvite: looksLikeInvite,
+    inviteValidity: inviteValidity,
+    memberSummary: memberSummary,
+    joinStateText: joinStateText,
+    onlineCount: onlineCount,
+    defaultNetworkName: defaultNetworkName,
     plural: plural,
     formatMs: formatMs,
     formatPercent: formatPercent,

@@ -8,30 +8,22 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <a class="skip" href="#main">Skip to content</a>
-
-  <div id="offline" class="offline" hidden>
-    <div class="offline-box" role="alert">
-      <h1 id="offline-title">The Lanfolk service is not running</h1>
-      <p>Lanfolk needs its background service to connect you to your friends. Start the Lanfolk service, or restart your computer if it was just installed.</p>
-      <p id="offline-detail" class="muted"></p>
-      <p class="muted">This window reconnects by itself as soon as the service is available.</p>
-      <button id="retry" type="button" class="primary">Retry</button>
+  <header class="titlebar" id="titlebar">
+    <div class="tb-brand" id="tb-brand"></div>
+    <div class="tb-actions">
+      <button type="button" class="tb-btn" id="tb-settings" title="Settings" aria-label="Settings"></button>
+      <button type="button" class="caption" id="tb-min" title="Minimize" aria-label="Minimize"></button>
+      <button type="button" class="caption caption-close" id="tb-close" title="Close to the notification area" aria-label="Close to the notification area"></button>
     </div>
-  </div>
+  </header>
 
-  <div id="shell" class="shell" hidden>
-    <nav class="nav" aria-label="Main">
-      <div class="brand"><span class="brand-mark" aria-hidden="true"></span>Lanfolk</div>
-      <ul id="nav-list"></ul>
-    </nav>
-    <main id="main" class="main" tabindex="-1"></main>
-  </div>
+  <main id="view" class="view" tabindex="-1"></main>
 
-  <footer id="statusbar" class="statusbar" aria-label="Connection status" hidden></footer>
-
+  <div id="menu" class="menu" role="menu" hidden></div>
+  <dialog id="dialog" class="dialog"></dialog>
   <div id="toasts" class="toasts" role="status" aria-live="polite"></div>
 
+  <script src="icons.js"></script>
   <script src="format.js"></script>
   <script src="app.js"></script>
 </body>

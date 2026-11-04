@@ -146,3 +146,62 @@ test('plural', () => {
   assert.equal(F.plural(0, 'member'), '0 members');
   assert.equal(F.plural(3, 'member'), '3 members');
 });
+
+// ---- helpers of the compact UI ----
+
+test('looksLikeInvite', () => {
+  assert.equal(F.looksLikeInvite('lanfolk-i1' + 'y'.repeat(106)), true);
+  assert.equal(F.looksLikeInvite('  lanfolk-i1' + 'y'.repeat(106) + '\n'), true);
+  assert.equal(F.looksLikeInvite('lanfolk1abc'), false);
+  assert.equal(F.looksLikeInvite('lanfolk-i1 has spaces in it and is long enough to pass'), false);
+  assert.equal(F.looksLikeInvite(''), false);
+  assert.equal(F.looksLikeInvite(null), false);
+});
+
+test('inviteValidity', () => {
+  const now = Date.parse('2026-11-04T12:00:00Z');
+  assert.equal(F.inviteValidity('2026-11-11T12:00:00Z', now), 'Works for 7 more days');
+  assert.equal(F.inviteValidity('2026-11-05T13:00:00Z', now), 'Works for 1 more day');
+  assert.equal(F.inviteValidity('2026-11-04T17:30:00Z', now), 'Works for 5 more hours');
+  assert.equal(F.inviteValidity('2026-11-04T12:30:00Z', now), 'Works for less than an hour');
+  assert.equal(F.inviteValidity('2026-11-04T11:00:00Z', now), 'Expired');
+  assert.equal(F.inviteValidity('garbage', now), '');
+});
+
+test('memberSummary', () => {
+  assert.deepEqual(F.memberSummary({ online: true, path: 'direct', ping_ms: 18.2 }), { text: '18 ms', sub: 'Direct', state: 'online' });
+  assert.deepEqual(F.memberSummary({ online: true, path: 'member-relay', relay_detail: 'Veli', ping_ms: 40 }), { text: '40 ms', sub: 'Via Veli', state: 'online' });
+  assert.deepEqual(F.memberSummary({ online: true, path: 'shared-relay', ping_ms: 151 }), { text: '151 ms', sub: 'Relay', state: 'online' });
+  assert.deepEqual(F.memberSummary({ online: true, path: 'tcp-fallback', ping_ms: 160 }), { text: '160 ms', sub: 'Relay (TCP)', state: 'online' });
+  assert.deepEqual(F.memberSummary({ online: true, path: 'none' }), { text: 'Connecting…', sub: '', state: 'connecting' });
+  assert.deepEqual(F.memberSummary({ online: false, path: 'none' }), { text: 'Offline', sub: '', state: 'offline' });
+  assert.deepEqual(F.memberSummary(undefined), { text: 'Offline', sub: '', state: 'offline' });
+});
+
+test('joinStateText', () => {
+  assert.equal(F.joinStateText({ state: 'waiting', owner_nickname: 'Zeynep' }), 'Waiting for Zeynep to come online…');
+  assert.equal(F.joinStateText({ state: 'waiting' }), 'Waiting for the owner to come online…');
+  assert.equal(F.joinStateText({ state: 'joining' }), 'Joining…');
+  assert.equal(F.joinStateText({ state: 'joined' }), 'Joined');
+  assert.equal(F.joinStateText({ state: 'expired' }), 'The invite expired');
+});
+
+test('onlineCount ignores yourself', () => {
+  const net = { members: [{ public_key: 'me', is_self: true }, { public_key: 'a' }, { public_key: 'b' }] };
+  const peers = [{ public_key: 'a', online: true }, { public_key: 'b', online: false }];
+  assert.deepEqual(F.onlineCount(net, peers), { online: 1, others: 2 });
+  assert.deepEqual(F.onlineCount(net, []), { online: 0, others: 2 });
+  assert.deepEqual(F.onlineCount({ members: [{ is_self: true }] }, []), { online: 0, others: 0 });
+});
+
+test('defaultNetworkName', () => {
+  assert.equal(F.defaultNetworkName('Ahmet'), "Ahmet's network");
+  assert.equal(F.defaultNetworkName(''), 'My network');
+  assert.ok(F.defaultNetworkName('x'.repeat(60)).length <= 32);
+});
+
+test('inviteValidity rounds a fresh code to whole days', () => {
+  const now = Date.parse('2026-11-04T12:00:00Z');
+  assert.equal(F.inviteValidity('2026-11-11T11:59:00Z', now), 'Works for 7 more days');
+  assert.equal(F.inviteValidity('2026-11-05T10:00:00Z', now), 'Works for 22 more hours');
+});
