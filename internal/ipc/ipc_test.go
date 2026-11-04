@@ -140,3 +140,67 @@ func TestCallerOfIdentifiesClient(t *testing.T) {
 		t.Fatal("no SID")
 	}
 }
+
+// A client that stops reading must not block Publish (the engine loop calls
+// it), and once it reads again it gets the newest state of each event.
+func TestPublishNeverBlocksAndCoalesces(t *testing.T) {
+	s, addr := startServer(t, func(ctx context.Context, method string, params json.RawMessage) (any, error) {
+		return nil, nil
+	}, nil)
+	if s.HasSubscribers() {
+		t.Fatal("subscribers before anyone connected")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	// A raw connection that subscribes and then does not read at all.
+	conn, err := dial(ctx, addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	json.NewEncoder(conn).Encode(Request{ID: 1, Method: MethodSubscribe})
+	deadline := time.Now().Add(3 * time.Second)
+	for !s.HasSubscribers() {
+		if time.Now().After(deadline) {
+			t.Fatal("subscription not seen")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	big := make([]Peer, 2000) // ~200 KB per event: more than a pipe buffer
+	for i := 0; i < 5; i++ {
+		big[0].Nickname = fmt.Sprint(i)
+		s.Publish(EventPeers, big)
+	}
+	time.Sleep(200 * time.Millisecond) // the writer is now stuck on the full pipe
+	start := time.Now()
+	for i := 0; i < 100; i++ {
+		s.Publish(EventStatus, Status{Version: fmt.Sprint(i)})
+	}
+	if d := time.Since(start); d > 500*time.Millisecond {
+		t.Fatalf("Publish blocked for %v on a client that does not read", d)
+	}
+
+	// A reading client receives the latest snapshot.
+	c, err := DialAddr(ctx, addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	if err := c.Subscribe(ctx); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 50; i++ {
+		s.Publish(EventStatus, Status{Version: fmt.Sprint(i)})
+	}
+	last := ""
+	for last != "49" {
+		select {
+		case m := <-c.Events():
+			var st Status
+			json.Unmarshal(m.Data, &st)
+			last = st.Version
+		case <-time.After(3 * time.Second):
+			t.Fatalf("latest status never arrived (last %q)", last)
+		}
+	}
+}

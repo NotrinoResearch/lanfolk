@@ -402,3 +402,41 @@ func TestMultipleSharedRelaysPickLowestRTT(t *testing.T) {
 		t.Fatalf("did not fall back to relay 0")
 	}
 }
+
+func TestFindMemberRelay(t *testing.T) {
+	a, _ := identity.Generate()
+	b, _ := identity.Generate()
+	m := New(DefaultConfig())
+	m.AddDirect(addrA, SourceSTUN, 0)
+	id := m.SetMemberRelay(a.Public(), addrB, time.Millisecond, 0)
+	if got, ok := m.FindMemberRelay(a.Public()); !ok || got != id {
+		t.Fatalf("got %v %v, want %v", got, ok, id)
+	}
+	if _, ok := m.FindMemberRelay(b.Public()); ok {
+		t.Fatal("found a path through an unknown member")
+	}
+	if n := testing.AllocsPerRun(100, func() { m.FindMemberRelay(a.Public()) }); n != 0 {
+		t.Fatalf("%v allocations per lookup", n)
+	}
+}
+
+// Member relay offers expire; expiring several at once must not skip any.
+func TestExpiredOffersAllRemoved(t *testing.T) {
+	m := New(DefaultConfig())
+	var vias []identity.PublicKey
+	for i := 0; i < 3; i++ {
+		k, _ := identity.Generate()
+		vias = append(vias, k.Public())
+		m.SetMemberRelay(k.Public(), addrB, time.Millisecond, 0)
+	}
+	m.AddDirect(addrA, SourceSTUN, 0)
+	m.Tick(int64(DefaultConfig().OfferTTL) + 1)
+	for _, v := range vias {
+		if _, ok := m.FindMemberRelay(v); ok {
+			t.Fatal("expired offer kept")
+		}
+	}
+	if _, ok := m.FindDirect(addrA); !ok {
+		t.Fatal("direct path removed")
+	}
+}

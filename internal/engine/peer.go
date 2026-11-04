@@ -205,7 +205,7 @@ func (e *Engine) reconcileLocked() {
 			p.isFriend, p.confirmed = false, false
 		}
 		if isMember && !p.managed {
-			e.startManagingLocked(p)
+			e.startManagingLocked(p, d.PeerCache)
 		} else if !isMember && p.managed {
 			e.stopManagingLocked(p)
 		}
@@ -235,7 +235,7 @@ func (e *Engine) pathConfig() pathmgr.Config {
 	return cfg
 }
 
-func (e *Engine) startManagingLocked(p *peer) {
+func (e *Engine) startManagingLocked(p *peer, cache []store.PeerCacheEntry) {
 	p.managed = true
 	now := nanotime()
 	p.mu.Lock()
@@ -246,7 +246,7 @@ func (e *Engine) startManagingLocked(p *peer) {
 	p.candSentAt = time.Time{}
 	p.mu.Unlock()
 	// Last-known-good addresses first (discovery order step 1).
-	for _, c := range e.store.Data().PeerCache {
+	for _, c := range cache {
 		if c.PublicKey != p.key.Hex() {
 			continue
 		}
@@ -544,13 +544,14 @@ func (e *Engine) noteSeen(p *peer, now time.Time) {
 	friend := p.isFriend
 	e.mu.Unlock()
 	if friend {
-		e.store.Update(func(d *store.Data) error {
+		// Runs on the socket read goroutine: never wait for the disk here.
+		key, at := p.key.Hex(), now.UTC()
+		e.store.UpdateLater(func(d *store.Data) {
 			for i := range d.Friends {
-				if d.Friends[i].PublicKey == p.key.Hex() {
-					d.Friends[i].LastSeenAt = now.UTC()
+				if d.Friends[i].PublicKey == key {
+					d.Friends[i].LastSeenAt = at
 				}
 			}
-			return nil
 		})
 	}
 }

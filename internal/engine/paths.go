@@ -35,20 +35,16 @@ func (e *Engine) SendWireGuard(pkt []byte, ep conn.Endpoint) error {
 	return errNoPath
 }
 
-// tickPaths advances every managed peer's path manager.
+// tickPaths advances every managed peer's path manager. It runs every
+// TickInterval and takes no engine lock in the common case.
 func (e *Engine) tickPaths() {
 	now := nanotime()
-	e.mu.Lock()
-	peers := make([]*peer, 0, len(e.peers))
-	for _, p := range e.peers {
-		if p.managed {
-			peers = append(peers, p)
-		}
+	var relays []*relayConn
+	if rs := e.relayIx.Load(); rs != nil {
+		relays = *rs
 	}
-	relays := append([]*relayConn(nil), e.relays...)
-	e.mu.Unlock()
 	addrsChanged := false
-	for _, p := range peers {
+	for _, p := range e.managedPeers() {
 		p.mu.Lock()
 		pm := p.pm
 		if pm == nil {
@@ -75,13 +71,16 @@ func (e *Engine) tickPaths() {
 		changed := pm.ActiveVersion() != p.pathVer
 		var info pathmgr.PathInfo
 		var hasActive bool
+		var st pathmgr.Stats
 		if changed {
 			p.pathVer = pm.ActiveVersion()
 			info, hasActive = pm.Active()
+			st = pm.Stats(now) // the UI shows the new path's numbers at once
 		}
-		st := pm.Stats(now)
 		p.mu.Unlock()
-		p.stats.Store(&st)
+		if changed {
+			p.stats.Store(&st)
+		}
 		// viaForInfo takes e.mu, so it runs after p.mu is released
 		// (rebuildAddrMap takes p.mu while holding e.mu).
 		for _, s := range sends {
@@ -107,6 +106,22 @@ func (e *Engine) tickPaths() {
 		e.mu.Lock()
 		e.rebuildAddrMap()
 		e.mu.Unlock()
+	}
+}
+
+// updateStats refreshes the live statistics once a second; only the UI and
+// relay offers read them.
+func (e *Engine) updateStats() {
+	now := nanotime()
+	for _, p := range e.managedPeers() {
+		p.mu.Lock()
+		if p.pm == nil {
+			p.mu.Unlock()
+			continue
+		}
+		st := p.pm.Stats(now)
+		p.mu.Unlock()
+		p.stats.Store(&st)
 	}
 }
 
@@ -154,9 +169,10 @@ func (e *Engine) rememberDirect(p *peer, a netip.AddrPort) {
 	}
 	p.cacheAt = now
 	p.mu.Unlock()
-	e.store.Update(func(d *store.Data) error {
-		d.RememberPath(p.key.Hex(), a.String(), pathmgr.Direct.String(), now.UTC())
-		return nil
+	// Runs on the engine loop: never wait for the disk here.
+	key, addr, at := p.key.Hex(), a.String(), now.UTC()
+	e.store.UpdateLater(func(d *store.Data) {
+		d.RememberPath(key, addr, pathmgr.Direct.String(), at)
 	})
 }
 

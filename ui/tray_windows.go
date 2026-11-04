@@ -336,6 +336,7 @@ func showWindow(ctx context.Context) {
 	// always-on-top flip brings the window to the front reliably.
 	wailsruntime.WindowSetAlwaysOnTop(ctx, true)
 	wailsruntime.WindowSetAlwaysOnTop(ctx, false)
+	onWindowShown()
 }
 
 var (

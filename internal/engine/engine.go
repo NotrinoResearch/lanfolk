@@ -72,6 +72,9 @@ type Config struct {
 	DHTAfter           time.Duration
 	// OnEvent receives UI events (internal/ipc event names).
 	OnEvent func(event string, data any)
+	// WantEvents, if set, reports whether anybody listens; events are not
+	// built while it returns false.
+	WantEvents func() bool
 }
 
 // MTU is the virtual adapter MTU (see the plan's MTU calculation).
@@ -98,6 +101,7 @@ type Engine struct {
 	cands        []candidate
 	candGen      uint32
 	candAt       time.Time
+	laddrs       *localAddrs
 	lastOffer    time.Time
 	relayLimiter relayLimiter
 	nick         string
@@ -111,6 +115,11 @@ type Engine struct {
 	byKeyID atomic.Pointer[map[identity.KeyID]*peer]
 	byAddr  atomic.Pointer[map[netip.AddrPort]*peer]
 	relayIx atomic.Pointer[[]*relayConn]
+	// managedA lists the peers with a path manager (members of the active
+	// network) for the path tick, which then needs no lock.
+	managedA atomic.Pointer[[]*peer]
+	// tickWake ends idle ticking when a peer becomes managed.
+	tickWake chan struct{}
 
 	// Invites (invite.go). All guarded by mu except inviteIx and the
 	// counters.
@@ -158,7 +167,8 @@ func New(cfg Config) (*Engine, error) {
 	e := &Engine{cfg: cfg, log: cfg.Logger, store: st,
 		peers: make(map[identity.PublicKey]*peer), lists: make(map[network.ID]*network.List),
 		owned: make(map[network.ID]invite.Code), pending: make(map[network.ID]*pendingJoin),
-		invSess: make(map[wire.SessionID]*inviteSession), joinTimes: make(map[network.ID][]time.Time)}
+		invSess: make(map[wire.SessionID]*inviteSession), joinTimes: make(map[network.ID][]time.Time),
+		tickWake: make(chan struct{}, 1)}
 	var b [8]byte
 	rand.Read(b[:])
 	// Boot IDs grow over time so a receiver can reject frames from an older
@@ -187,6 +197,7 @@ func New(cfg Config) (*Engine, error) {
 		return nil, err
 	}
 	e.bind = transport.NewBind(e, e.sock.Port())
+	e.laddrs = newLocalAddrs()
 	e.storeMaps()
 	if !cfg.DisableDHT {
 		e.dht = newDHTFallback(e)
@@ -282,8 +293,9 @@ func (e *Engine) Run(ctx context.Context) error {
 		e.startTunnelLocked()
 	}
 	e.mu.Unlock()
-	e.wg.Add(1)
+	e.wg.Add(2)
 	go func() { defer e.wg.Done(); e.sock.Run(e.onPacket) }()
+	go func() { defer e.wg.Done(); e.laddrs.run(ctx, func() { e.refreshCandidates(true) }) }()
 	if !e.cfg.DisablePortMapping {
 		pm := startPortMapper(ctx, e)
 		e.mu.Lock()
@@ -322,10 +334,17 @@ func (e *Engine) shutdown() {
 	}
 	e.sock.Close()
 	e.wg.Wait()
+	if err := e.store.Flush(); err != nil {
+		e.log.Warn("saving state at shutdown failed", "err", err)
+	}
 }
 
+// idleTick is the path tick while no network is active: there is nothing
+// to probe, so the service should not wake the CPU 20 times a second.
+const idleTick = time.Second
+
 func (e *Engine) loop(ctx context.Context) {
-	t := time.NewTicker(e.cfg.TickInterval)
+	t := time.NewTimer(e.cfg.TickInterval)
 	defer t.Stop()
 	slow := time.NewTicker(time.Second)
 	defer slow.Stop()
@@ -334,17 +353,32 @@ func (e *Engine) loop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			e.tickPaths()
+		case <-e.tickWake:
 		case <-slow.C:
 			e.tickSlow()
+			continue
 		}
+		e.tickPaths()
+		next := e.cfg.TickInterval
+		if len(e.managedPeers()) == 0 {
+			next = idleTick
+		}
+		t.Reset(next)
 	}
+}
+
+func (e *Engine) managedPeers() []*peer {
+	if m := e.managedA.Load(); m != nil {
+		return *m
+	}
+	return nil
 }
 
 // tickSlow runs once a second: presence, Hellos, candidates, relay offers,
 // relay list changes, DHT fallback and UI updates.
 func (e *Engine) tickSlow() {
 	now := time.Now()
+	e.updateStats()
 	e.mu.Lock()
 	peers := e.peerListLocked()
 	e.mu.Unlock()
@@ -438,10 +472,21 @@ func (e *Engine) storeMaps() {
 	bySID := make(map[wire.SessionID]*peer, len(e.peers))
 	byKeyID := make(map[identity.KeyID]*peer, len(e.peers))
 	byKey := make(map[identity.PublicKey]*peer, len(e.peers))
+	var managed []*peer
 	for _, p := range e.peers {
 		bySID[p.sid] = p
 		byKeyID[p.keyID] = p
 		byKey[p.key] = p
+		if p.managed {
+			managed = append(managed, p)
+		}
+	}
+	e.managedA.Store(&managed)
+	if len(managed) > 0 {
+		select {
+		case e.tickWake <- struct{}{}:
+		default:
+		}
 	}
 	e.bySID.Store(&bySID)
 	e.byKeyID.Store(&byKeyID)
@@ -474,6 +519,10 @@ func (e *Engine) emit(event string, data any) {
 	if e.cfg.OnEvent != nil {
 		e.cfg.OnEvent(event, data)
 	}
+}
+
+func (e *Engine) wantEvents() bool {
+	return e.cfg.OnEvent != nil && (e.cfg.WantEvents == nil || e.cfg.WantEvents())
 }
 
 func nanotime() int64 { return clock.Nanotime() }

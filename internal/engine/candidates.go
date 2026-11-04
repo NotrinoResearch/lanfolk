@@ -2,7 +2,6 @@ package engine
 
 import (
 	"context"
-	"net"
 	"net/netip"
 	"sort"
 	"time"
@@ -11,6 +10,8 @@ import (
 	"github.com/NotrinoResearch/lanfolk/internal/pathmgr"
 	"github.com/NotrinoResearch/lanfolk/internal/portmap"
 )
+
+const candidateInterval = time.Second
 
 type candidate struct {
 	addr   netip.AddrPort
@@ -35,26 +36,15 @@ func (e *Engine) collectCandidates() []candidate {
 	if e.cfg.LoopbackCandidates {
 		add(netip.AddrPortFrom(netip.MustParseAddr("127.0.0.1"), port), pathmgr.SourceLocal)
 	}
-	ifaces, _ := net.Interfaces()
-	for _, ifc := range ifaces {
-		if ifc.Flags&net.FlagUp == 0 || ifc.Flags&net.FlagLoopback != 0 {
+	// Cached; read off the engine loop (localaddrs.go).
+	for _, ip := range e.laddrs.get() {
+		switch {
+		case network.Prefix.Contains(ip), ip.IsLinkLocalUnicast(), ip.IsLoopback(), ip.IsUnspecified():
 			continue
-		}
-		addrs, _ := ifc.Addrs()
-		for _, a := range addrs {
-			pfx, err := netip.ParsePrefix(a.String())
-			if err != nil {
-				continue
-			}
-			ip := pfx.Addr().Unmap()
-			switch {
-			case network.Prefix.Contains(ip), ip.IsLinkLocalUnicast(), ip.IsLoopback(), ip.IsUnspecified():
-				continue
-			case ip.Is4():
-				add(netip.AddrPortFrom(ip, port), pathmgr.SourceLocal)
-			case ip.Is6() && ip.IsGlobalUnicast() && !ip.IsPrivate():
-				add(netip.AddrPortFrom(ip, port), pathmgr.SourceIPv6)
-			}
+		case ip.Is4():
+			add(netip.AddrPortFrom(ip, port), pathmgr.SourceLocal)
+		case ip.Is6() && ip.IsGlobalUnicast() && !ip.IsPrivate():
+			add(netip.AddrPortFrom(ip, port), pathmgr.SourceIPv6)
 		}
 	}
 	if rs := e.relayIx.Load(); rs != nil {
@@ -106,7 +96,9 @@ func sameCandidates(a, b []candidate) bool {
 // new list and probing restarts (network change, plan rule 8).
 func (e *Engine) refreshCandidates(force bool) {
 	e.mu.Lock()
-	if !force && time.Since(e.candAt) < 10*time.Second {
+	// Collecting is cheap (interface addresses are cached), so the relays'
+	// STUN-observed address and the port mapping are checked every second.
+	if !force && time.Since(e.candAt) < candidateInterval {
 		e.mu.Unlock()
 		return
 	}

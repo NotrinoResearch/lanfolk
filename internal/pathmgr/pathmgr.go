@@ -381,6 +381,17 @@ func (m *Manager) SetMemberRelay(via identity.PublicKey, viaAddr netip.AddrPort,
 	return m.add(&path{kind: MemberRelay, via: via, addr: viaAddr, advertised: int64(advertised), offerAt: now}, now)
 }
 
+// FindMemberRelay returns the path through via without allocating (it runs
+// for every packet a relaying member delivers).
+func (m *Manager) FindMemberRelay(via identity.PublicKey) (PathID, bool) {
+	for _, id := range m.order {
+		if p := m.paths[id]; p.kind == MemberRelay && p.via == via {
+			return id, true
+		}
+	}
+	return 0, false
+}
+
 // RemoveMemberRelay removes the path through via.
 func (m *Manager) RemoveMemberRelay(via identity.PublicKey) {
 	for _, id := range append([]PathID(nil), m.order...) {
@@ -456,10 +467,12 @@ func (m *Manager) nextBackoff(p *path) int64 {
 // active path.
 func (m *Manager) Tick(now int64) []Probe {
 	if ttl := int64(m.cfg.OfferTTL); ttl > 0 {
-		for _, id := range append([]PathID(nil), m.order...) {
-			if p := m.paths[id]; p.kind == MemberRelay && now-p.offerAt > ttl {
-				m.remove(id)
+		for i := 0; i < len(m.order); {
+			if p := m.paths[m.order[i]]; p.kind == MemberRelay && now-p.offerAt > ttl {
+				m.remove(p.id) // shifts m.order
+				continue
 			}
+			i++
 		}
 	}
 	var probes []Probe

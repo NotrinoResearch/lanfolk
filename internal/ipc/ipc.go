@@ -10,6 +10,7 @@ import (
 	"net"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 // Request is one call.
@@ -65,6 +66,54 @@ type serverConn struct {
 	writeMu    sync.Mutex
 	enc        *json.Encoder
 	subscribed atomic.Bool
+
+	// Events wait here for the connection's writer goroutine, so Publish
+	// never blocks on a slow or frozen client. Every event is a snapshot of
+	// state, so a newer one replaces an unsent one of the same name.
+	evMu    sync.Mutex
+	evData  map[string]json.RawMessage
+	evOrder []string
+	evKick  chan struct{}
+}
+
+// eventWriteTimeout closes a client that has not read an event for this
+// long; it reconnects when it runs again.
+const eventWriteTimeout = 30 * time.Second
+
+func (c *serverConn) queueEvent(name string, data json.RawMessage) {
+	c.evMu.Lock()
+	if _, ok := c.evData[name]; !ok {
+		c.evOrder = append(c.evOrder, name)
+	}
+	c.evData[name] = data
+	c.evMu.Unlock()
+	select {
+	case c.evKick <- struct{}{}:
+	default:
+	}
+}
+
+func (c *serverConn) writeEvents(done <-chan struct{}) {
+	for {
+		select {
+		case <-done:
+			return
+		case <-c.evKick:
+		}
+		c.evMu.Lock()
+		order, data := c.evOrder, c.evData
+		c.evOrder, c.evData = nil, make(map[string]json.RawMessage, len(data))
+		c.evMu.Unlock()
+		for _, name := range order {
+			c.conn.SetWriteDeadline(time.Now().Add(eventWriteTimeout))
+			err := c.send(&Message{Event: name, Data: data[name]})
+			c.conn.SetWriteDeadline(time.Time{})
+			if err != nil {
+				c.conn.Close()
+				return
+			}
+		}
+	}
 }
 
 func (c *serverConn) send(m *Message) error {
@@ -112,7 +161,10 @@ func (s *Server) handle(ctx context.Context, conn net.Conn) {
 			return
 		}
 	}
-	sc := &serverConn{conn: conn, enc: json.NewEncoder(conn)}
+	sc := &serverConn{conn: conn, enc: json.NewEncoder(conn),
+		evData: make(map[string]json.RawMessage), evKick: make(chan struct{}, 1)}
+	done := make(chan struct{})
+	defer close(done)
 	s.mu.Lock()
 	if s.clients == nil {
 		s.clients = make(map[*serverConn]struct{})
@@ -133,7 +185,9 @@ func (s *Server) handle(ctx context.Context, conn net.Conn) {
 			continue
 		}
 		if req.Method == MethodSubscribe {
-			sc.subscribed.Store(true)
+			if !sc.subscribed.Swap(true) {
+				go sc.writeEvents(done)
+			}
 			sc.send(&Message{ID: req.ID, Result: json.RawMessage("true")})
 			continue
 		}
@@ -173,12 +227,9 @@ func (s *Server) call(ctx context.Context, req Request) (res any, err error) {
 	return s.Handler(ctx, req.Method, req.Params)
 }
 
-// Publish sends an event to every subscribed client.
+// Publish queues an event for every subscribed client. It never blocks on
+// a client and encodes nothing when no client is subscribed.
 func (s *Server) Publish(event string, data any) {
-	b, err := json.Marshal(data)
-	if err != nil {
-		return
-	}
 	s.mu.Lock()
 	clients := make([]*serverConn, 0, len(s.clients))
 	for c := range s.clients {
@@ -187,9 +238,29 @@ func (s *Server) Publish(event string, data any) {
 		}
 	}
 	s.mu.Unlock()
-	for _, c := range clients {
-		c.send(&Message{Event: event, Data: b})
+	if len(clients) == 0 {
+		return
 	}
+	b, err := json.Marshal(data)
+	if err != nil {
+		return
+	}
+	for _, c := range clients {
+		c.queueEvent(event, b)
+	}
+}
+
+// HasSubscribers reports whether any client listens for events, so callers
+// can skip building them.
+func (s *Server) HasSubscribers() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for c := range s.clients {
+		if c.subscribed.Load() {
+			return true
+		}
+	}
+	return false
 }
 
 // Client is a connection to the service.

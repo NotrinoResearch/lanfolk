@@ -152,7 +152,11 @@ func (e *Engine) inviteSession(sid wire.SessionID) *inviteSession {
 	return nil
 }
 
-func (e *Engine) publishInvites() { e.emit(ipc.EventInvites, e.PendingJoins()) }
+func (e *Engine) publishInvites() {
+	if e.wantEvents() {
+		e.emit(ipc.EventInvites, e.PendingJoins())
+	}
+}
 
 // CreateInvite returns the invite code of an owned network. The current code
 // is returned while it is valid; reset (or an expired code) creates a new one

@@ -65,7 +65,8 @@ func main() {
 		processMode = "settings"
 	}
 
-	host := &wailsHost{}
+	host := &wailsHost{gatePeers: !*settings}
+	onWindowShown = host.windowShown
 	var tr *tray
 	app := NewApp(addr, teeHost{Host: host, also: func(e string, d any) {
 		if tr != nil {
@@ -130,6 +131,9 @@ func main() {
 		fatal(err)
 	}
 }
+
+// onWindowShown runs after showWindow brings the main window up.
+var onWindowShown = func() {}
 
 // processMode is "main" or "settings".
 var processMode = "main"

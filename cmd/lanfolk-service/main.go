@@ -165,10 +165,11 @@ func newLogger(o options, console bool) (*slog.Logger, error) {
 func serve(ctx context.Context, o options, log *slog.Logger) error {
 	srv := &ipc.Server{Logger: log}
 	cfg := engine.Config{
-		DataDir: o.dataDir,
-		Logger:  log,
-		Blocked: winnet.IsBlocked,
-		OnEvent: srv.Publish,
+		DataDir:    o.dataDir,
+		Logger:     log,
+		Blocked:    winnet.IsBlocked,
+		OnEvent:    srv.Publish,
+		WantEvents: srv.HasSubscribers,
 	}
 	cfg.ListenAddr = o.listen
 	cfg.LoopbackCandidates = o.loopback

@@ -84,15 +84,15 @@ func (e *Engine) onMemberDeliver(b []byte, from netip.AddrPort) {
 		return
 	}
 	v := via{kind: pathmgr.MemberRelay, addr: from, relayer: relayer}
-	origin.mu.Lock()
-	if origin.pm != nil {
-		for _, pi := range origin.pm.Paths(0) {
-			if pi.Kind == pathmgr.MemberRelay && pi.Via == relayer.key {
-				v.pathID = pi.ID
-			}
+	if a := origin.active.Load(); a != nil && a.kind == pathmgr.MemberRelay && a.relayer == relayer {
+		v.pathID = a.pathID // common case: no lock
+	} else {
+		origin.mu.Lock()
+		if origin.pm != nil {
+			v.pathID, _ = origin.pm.FindMemberRelay(relayer.key)
 		}
+		origin.mu.Unlock()
 	}
-	origin.mu.Unlock()
 	switch wire.Classify(payload) {
 	case wire.ClassWireGuard:
 		origin.noteInbound(v.pathID)

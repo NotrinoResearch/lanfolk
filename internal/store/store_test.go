@@ -81,3 +81,89 @@ func TestPeerCacheBounded(t *testing.T) {
 		t.Fatalf("peer cache has %d entries", n)
 	}
 }
+
+func TestUpdateLaterBatchesAndFlushes(t *testing.T) {
+	dir := t.TempDir()
+	s, _ := Open(dir)
+	s.Update(func(d *Data) error {
+		d.Friends = append(d.Friends, Friend{PublicKey: "aa"})
+		return nil
+	})
+	fi, _ := os.Stat(filepath.Join(dir, FileName))
+	before := fi.ModTime()
+	for i := 1; i <= 50; i++ {
+		at := time.Unix(int64(i), 0).UTC()
+		s.UpdateLater(func(d *Data) { d.Friends[0].LastSeenAt = at })
+	}
+	if !s.Data().Friends[0].LastSeenAt.IsZero() {
+		t.Fatal("queued change visible before it was saved")
+	}
+	if fi, _ := os.Stat(filepath.Join(dir, FileName)); !fi.ModTime().Equal(before) {
+		t.Fatal("UpdateLater wrote at once")
+	}
+	if err := s.Flush(); err != nil {
+		t.Fatal(err)
+	}
+	// Applied in order: the last change wins.
+	if got := s.Data().Friends[0].LastSeenAt; got != time.Unix(50, 0).UTC() {
+		t.Fatalf("last seen %v", got)
+	}
+	s2, _ := Open(dir)
+	if got := s2.Data().Friends[0].LastSeenAt; got != time.Unix(50, 0).UTC() {
+		t.Fatalf("not persisted: %v", got)
+	}
+	if err := s.Flush(); err != nil { // nothing queued
+		t.Fatal(err)
+	}
+}
+
+func TestUpdateSavesQueuedChanges(t *testing.T) {
+	dir := t.TempDir()
+	s, _ := Open(dir)
+	s.UpdateLater(func(d *Data) { d.Identity.Nickname = "queued" })
+	s.Update(func(d *Data) error {
+		if d.Identity.Nickname != "queued" {
+			t.Error("Update did not see the queued change first")
+		}
+		d.Settings.RelayOnly = true
+		return nil
+	})
+	s2, _ := Open(dir)
+	if d := s2.Data(); d.Identity.Nickname != "queued" || !d.Settings.RelayOnly {
+		t.Fatalf("not persisted: %+v", d.Identity)
+	}
+}
+
+func TestUpdateLaterSavesByItself(t *testing.T) {
+	dir := t.TempDir()
+	s, _ := Open(dir)
+	s.UpdateLater(func(d *Data) { d.Identity.Nickname = "timer" })
+	deadline := time.Now().Add(LaterDelay + 3*time.Second)
+	for s.Data().Identity.Nickname != "timer" {
+		if time.Now().After(deadline) {
+			t.Fatal("queued change was never saved")
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+// UpdateLater must not wait for a save in progress (it runs on the socket
+// read goroutine).
+func TestUpdateLaterDoesNotBlockOnSave(t *testing.T) {
+	s, _ := Open(t.TempDir())
+	started, release := make(chan struct{}), make(chan struct{})
+	go s.Update(func(d *Data) error {
+		close(started)
+		<-release // holds the store lock like a slow disk write
+		return nil
+	})
+	<-started
+	done := make(chan struct{})
+	go func() { s.UpdateLater(func(d *Data) {}); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("UpdateLater blocked behind Update")
+	}
+	close(release)
+}

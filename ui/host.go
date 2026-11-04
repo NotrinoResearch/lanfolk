@@ -4,6 +4,8 @@ import (
 	"context"
 	"sync"
 
+	"github.com/NotrinoResearch/lanfolk/internal/ipc"
+
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
@@ -27,6 +29,11 @@ type Host interface {
 type wailsHost struct {
 	mu  sync.Mutex
 	ctx context.Context
+	// gatePeers holds back the once-a-second peers event while the main
+	// window is hidden or minimized (most of the time: Lanfolk lives in the
+	// tray during a game); the last one is sent when the window is shown.
+	gatePeers bool
+	held      any
 }
 
 func (h *wailsHost) setContext(ctx context.Context) {
@@ -42,8 +49,33 @@ func (h *wailsHost) context() context.Context {
 }
 
 func (h *wailsHost) Emit(event string, data any) {
-	if ctx := h.context(); ctx != nil {
-		wailsruntime.EventsEmit(ctx, event, data)
+	ctx := h.context()
+	if ctx == nil {
+		return
+	}
+	if h.gatePeers && event == ipc.EventPeers {
+		if !windowVisible() {
+			h.mu.Lock()
+			h.held = data
+			h.mu.Unlock()
+			return
+		}
+		h.mu.Lock()
+		h.held = nil
+		h.mu.Unlock()
+	}
+	wailsruntime.EventsEmit(ctx, event, data)
+}
+
+// windowShown sends the peers snapshot held back while the window was
+// hidden, so the window never shows old numbers.
+func (h *wailsHost) windowShown() {
+	h.mu.Lock()
+	data := h.held
+	h.held = nil
+	h.mu.Unlock()
+	if ctx := h.context(); ctx != nil && data != nil {
+		wailsruntime.EventsEmit(ctx, ipc.EventPeers, data)
 	}
 }
 

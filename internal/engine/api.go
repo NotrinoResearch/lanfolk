@@ -452,11 +452,31 @@ func (e *Engine) ClaimOwner(sid string) (bool, error) {
 	return owner == sid, err
 }
 
-func (e *Engine) publishFriends()  { e.emit(ipc.EventFriends, e.Friends()) }
-func (e *Engine) publishNetworks() { e.emit(ipc.EventNetworks, e.Networks()) }
-func (e *Engine) publishStatus()   { e.emit(ipc.EventStatus, e.Status()) }
+// The publish functions build a snapshot only when somebody listens; the UI
+// reads all of them again when it subscribes.
+
+func (e *Engine) publishFriends() {
+	if e.wantEvents() {
+		e.emit(ipc.EventFriends, e.Friends())
+	}
+}
+
+func (e *Engine) publishNetworks() {
+	if e.wantEvents() {
+		e.emit(ipc.EventNetworks, e.Networks())
+	}
+}
+
+func (e *Engine) publishStatus() {
+	if e.wantEvents() {
+		e.emit(ipc.EventStatus, e.Status())
+	}
+}
 
 func (e *Engine) publishPeers() {
+	if !e.wantEvents() {
+		return
+	}
 	e.mu.Lock()
 	active := e.active != nil
 	e.mu.Unlock()

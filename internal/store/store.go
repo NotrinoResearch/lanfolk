@@ -149,11 +149,20 @@ func (d *Data) RememberPath(pub, addr, pathType string, at time.Time) {
 	}
 }
 
+// LaterDelay is how long UpdateLater waits to batch changes into one write.
+const LaterDelay = 5 * time.Second
+
 // Store guards the file.
 type Store struct {
 	dir  string
 	mu   sync.Mutex
 	data Data
+
+	// Deferred changes (UpdateLater). qmu is never held during disk I/O, so
+	// queueing never blocks, even while a save is running.
+	qmu   sync.Mutex
+	queue []func(*Data)
+	timer *time.Timer
 }
 
 // Open loads or creates the store in dir (created with mode 0700). A file
@@ -205,19 +214,86 @@ func (s *Store) Data() Data {
 }
 
 // Update applies fn to a copy and saves it atomically. If fn or the save
-// fails, nothing changes.
+// fails, nothing changes. Changes queued with UpdateLater are applied first,
+// so they are saved too.
 func (s *Store) Update(fn func(*Data) error) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	q := s.takeQueue() // under mu, so queued changes are applied in order
 	d := clone(s.data)
+	for _, f := range q {
+		f(&d)
+	}
 	if err := fn(&d); err != nil {
+		if len(q) > 0 {
+			s.requeue(q)
+		}
 		return err
 	}
 	if err := s.save(d); err != nil {
+		if len(q) > 0 {
+			s.requeue(q)
+		}
 		return err
 	}
 	s.data = d
 	return nil
+}
+
+// UpdateLater queues a change that may wait up to LaterDelay to be saved,
+// together with other queued changes, in one write. It never blocks on disk
+// I/O, so it is safe on the packet path. Use it for bookkeeping (last seen
+// times, path cache); Data does not show the change until it is saved.
+func (s *Store) UpdateLater(fn func(*Data)) {
+	s.qmu.Lock()
+	defer s.qmu.Unlock()
+	s.queue = append(s.queue, fn)
+	if s.timer == nil {
+		s.timer = time.AfterFunc(LaterDelay, func() { s.Flush() })
+	}
+}
+
+// Flush saves the changes queued with UpdateLater now.
+func (s *Store) Flush() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	q := s.takeQueue()
+	if len(q) == 0 {
+		return nil
+	}
+	d := clone(s.data)
+	for _, f := range q {
+		f(&d)
+	}
+	if err := s.save(d); err != nil {
+		s.requeue(q)
+		return err
+	}
+	s.data = d
+	return nil
+}
+
+func (s *Store) takeQueue() []func(*Data) {
+	s.qmu.Lock()
+	defer s.qmu.Unlock()
+	q := s.queue
+	s.queue = nil
+	if s.timer != nil {
+		s.timer.Stop()
+		s.timer = nil
+	}
+	return q
+}
+
+// requeue puts changes back in front after a failed save; a later Update or
+// Flush retries them.
+func (s *Store) requeue(q []func(*Data)) {
+	s.qmu.Lock()
+	defer s.qmu.Unlock()
+	s.queue = append(q, s.queue...)
+	if s.timer == nil {
+		s.timer = time.AfterFunc(LaterDelay, func() { s.Flush() })
+	}
 }
 
 func (s *Store) save(d Data) error {
