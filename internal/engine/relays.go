@@ -144,6 +144,8 @@ func (e *Engine) startRelay(w relayConn) *relayConn {
 		OnPeerJoined: func(sid wire.SessionID) {
 			if p := e.peerBySID(sid); p != nil {
 				go e.sendHello(p)
+			} else if is := e.inviteSession(sid); is != nil && !is.owner {
+				go e.sendJoinRequest(is, true)
 			}
 		},
 		OnObserved:   func(netip.AddrPort) { go e.refreshCandidates(true) },
@@ -158,6 +160,9 @@ func (e *Engine) startRelay(w relayConn) *relayConn {
 	for _, p := range e.peers {
 		r.client.Register(p.sid)
 	}
+	for sid := range e.invSess {
+		r.client.Register(sid)
+	}
 	e.wg.Add(1)
 	go func() { defer e.wg.Done(); r.client.Run(ctx) }()
 	return r
@@ -167,6 +172,12 @@ func (e *Engine) startRelay(w relayConn) *relayConn {
 func (e *Engine) onRelayPayload(r *relayConn, sid wire.SessionID, payload []byte, viaTCP bool) {
 	p := e.peerBySID(sid)
 	if p == nil {
+		// Not a friend or member: it may belong to an invite session.
+		if is := e.inviteSession(sid); is != nil && wire.Classify(payload) == wire.ClassControl {
+			if s, ok := wire.ControlSession(payload); ok && s == sid {
+				e.onInviteFrame(r, is, payload)
+			}
+		}
 		return
 	}
 	idx := e.relayIndex(r)

@@ -38,6 +38,10 @@ const (
 	MethodCreateConnCode    = "conncode.create"
 	MethodUseConnCode       = "conncode.use"
 	MethodExportDiagnostics = "diagnostics.export"
+	MethodCreateInvite      = "invites.create"
+	MethodRedeemInvite      = "invites.redeem"
+	MethodListInvites       = "invites.list"
+	MethodCancelInvite      = "invites.cancel"
 )
 
 // Events pushed to subscribed clients.
@@ -46,6 +50,7 @@ const (
 	EventPeers    = "peers"    // []Peer, every second while a network is active
 	EventFriends  = "friends"  // []Friend, on change
 	EventNetworks = "networks" // []Network, on change
+	EventInvites  = "invites"  // []PendingJoin, on change
 )
 
 // Error codes.
@@ -141,6 +146,25 @@ type Peer struct {
 	Quality     string  `json:"quality"` // "good", "fair", "poor" or "unknown"
 }
 
+// Pending join states.
+const (
+	JoinWaiting = "waiting" // the invite's owner has not answered yet
+	JoinJoining = "joining" // the owner accepted; the member list is on its way
+	JoinJoined  = "joined"  // the network is in the list of networks
+	JoinExpired = "expired" // the invite ran out before the join completed
+)
+
+// PendingJoin is an invite code the user redeemed and its progress. Entries
+// stay in the list for a day after they end.
+type PendingJoin struct {
+	NetworkID      string    `json:"network_id"`
+	NetworkName    string    `json:"network_name,omitempty"` // known once the owner accepted
+	OwnerPublicKey string    `json:"owner_public_key"`
+	OwnerNickname  string    `json:"owner_nickname,omitempty"`
+	State          string    `json:"state"` // JoinWaiting, JoinJoining, JoinJoined or JoinExpired
+	Expires        time.Time `json:"expires"`
+}
+
 // Settings are the user-adjustable options.
 type Settings struct {
 	RelayOnly    bool    `json:"relay_only"`
@@ -198,6 +222,19 @@ type (
 	}
 	CodeParams struct {
 		Code string `json:"code"`
+	}
+	InviteParams struct {
+		NetworkID string `json:"network_id"`
+		Reset     bool   `json:"reset,omitempty"` // replace the current code with a new one
+	}
+	InviteResult struct {
+		Code    string    `json:"code"`
+		Expires time.Time `json:"expires"`
+	}
+	RedeemResult struct {
+		NetworkID      string `json:"network_id"`
+		OwnerPublicKey string `json:"owner_public_key"`
+		State          string `json:"state"`
 	}
 	DiagnosticsResult struct {
 		Report string `json:"report"`

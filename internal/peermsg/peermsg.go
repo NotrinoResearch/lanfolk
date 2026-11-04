@@ -1,6 +1,7 @@
 // Package peermsg encodes the peer-to-peer control messages that travel in
 // encrypted control frames (wire.SealControl): Hello, MembershipUpdate,
-// Candidates, PathProbe, PathProbeAck, RelayOffer and Bye.
+// Candidates, PathProbe, PathProbeAck, RelayOffer and Bye, plus the two
+// invite messages JoinRequest and JoinAccepted (docs/DECISIONS.md D-025).
 //
 // Plaintext layout: boot (u64) | counter (u64) | type (u8) | body. Boot and
 // counter give replay protection; see docs/PROTOCOL.md.
@@ -27,6 +28,8 @@ const (
 	TypePathProbeAck     uint8 = 5
 	TypeRelayOffer       uint8 = 6
 	TypeBye              uint8 = 7
+	TypeJoinRequest      uint8 = 8
+	TypeJoinAccepted     uint8 = 9
 )
 
 // Limits keep every message inside one datagram on every path.
@@ -128,6 +131,29 @@ type RelayOffer struct {
 // Bye announces that the sender is going offline.
 type Bye struct{}
 
+// SignatureSize is the size of the Ed25519 signatures in the join messages.
+const SignatureSize = 64
+
+// JoinRequest asks the owner of an invite to add the sender to a network. It
+// travels in the invite session, sealed with the invite key. Signature is the
+// joiner's Ed25519 signature over invite.JoinRequestSigData.
+type JoinRequest struct {
+	Network   network.ID
+	Joiner    identity.PublicKey
+	Timestamp int64 // unix seconds
+	Nickname  string
+	Signature [SignatureSize]byte
+}
+
+// JoinAccepted is the owner's answer to a JoinRequest. Signature is the
+// owner's Ed25519 signature over invite.JoinAcceptedSigData.
+type JoinAccepted struct {
+	Network       network.ID
+	OwnerNickname string
+	NetworkName   string
+	Signature     [SignatureSize]byte
+}
+
 func (*Hello) Type() uint8            { return TypeHello }
 func (*MembershipUpdate) Type() uint8 { return TypeMembershipUpdate }
 func (*Candidates) Type() uint8       { return TypeCandidates }
@@ -135,6 +161,8 @@ func (*PathProbe) Type() uint8        { return TypePathProbe }
 func (*PathProbeAck) Type() uint8     { return TypePathProbeAck }
 func (*RelayOffer) Type() uint8       { return TypeRelayOffer }
 func (*Bye) Type() uint8              { return TypeBye }
+func (*JoinRequest) Type() uint8      { return TypeJoinRequest }
+func (*JoinAccepted) Type() uint8     { return TypeJoinAccepted }
 
 // Marshal encodes a message with its header. Lists longer than the limits
 // are truncated.
@@ -173,6 +201,10 @@ func Unmarshal(b []byte) (Header, Message, error) {
 		m = &RelayOffer{}
 	case TypeBye:
 		m = &Bye{}
+	case TypeJoinRequest:
+		m = &JoinRequest{}
+	case TypeJoinAccepted:
+		m = &JoinAccepted{}
 	default:
 		return h, nil, errors.New("unknown control message type")
 	}
@@ -394,6 +426,40 @@ func (m *RelayOffer) parseBody(p []byte) error {
 
 func (*Bye) appendBody(b []byte) []byte { return b }
 func (*Bye) parseBody([]byte) error     { return nil }
+
+func (m *JoinRequest) appendBody(b []byte) []byte {
+	b = append(b, m.Network[:]...)
+	b = append(b, m.Joiner[:]...)
+	b = binary.BigEndian.AppendUint64(b, uint64(m.Timestamp))
+	b = appendStr(b, m.Nickname, network.MaxNicknameLen)
+	return append(b, m.Signature[:]...)
+}
+
+func (m *JoinRequest) parseBody(p []byte) error {
+	r := &reader{b: p}
+	copy(m.Network[:], r.take(16))
+	copy(m.Joiner[:], r.take(32))
+	m.Timestamp = int64(r.u64())
+	m.Nickname = r.str(network.MaxNicknameLen)
+	copy(m.Signature[:], r.take(SignatureSize))
+	return r.err
+}
+
+func (m *JoinAccepted) appendBody(b []byte) []byte {
+	b = append(b, m.Network[:]...)
+	b = appendStr(b, m.OwnerNickname, network.MaxNicknameLen)
+	b = appendStr(b, m.NetworkName, network.MaxNameLen)
+	return append(b, m.Signature[:]...)
+}
+
+func (m *JoinAccepted) parseBody(p []byte) error {
+	r := &reader{b: p}
+	copy(m.Network[:], r.take(16))
+	m.OwnerNickname = r.str(network.MaxNicknameLen)
+	m.NetworkName = r.str(network.MaxNameLen)
+	copy(m.Signature[:], r.take(SignatureSize))
+	return r.err
+}
 
 // Fragment splits a signed member list into MembershipUpdate messages.
 func Fragment(data []byte, msgID uint32) []*MembershipUpdate {

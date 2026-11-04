@@ -272,3 +272,84 @@ administrators. If no owner was recorded, the first client becomes the owner.
 and `-no-tun`. They let several instances run on one machine without
 administrator rights, without a firewall prompt and against a local relay.
 The NAT simulation uses them on Linux.
+
+## D-025 Joining a network with one invite code
+
+**Problem:** joining took three manual steps: both people exchanged friend
+codes, waited until the friendship was active, and then the owner added the
+member. For a game night that is too much; Hamachi needs only a network name
+and a password.
+
+**Decision:** the owner presses "Invite" and gets one code (`lanfolk-i1...`,
+docs/PROTOCOL.md section 10.3). The friend pastes it and is a member a few
+seconds later, with no further action on either side. The code holds the owner's
+key, the network ID, a 128-bit random token and an expiry (7 days). It is
+reusable until it expires or the owner resets it. There is one invite per
+owned network, stored with the owner's data.
+
+**Design and why:**
+
+- *Rendezvous on the shared relay.* A joiner has no friendship with the owner
+  yet, so there is no pair session to talk in. From the token both sides derive
+  an invite session ID and a symmetric key (HKDF, labels under
+  `lanfolk/v1/invite`) and meet in that session at the relay, which already
+  does exactly this for pairs and needs no change. The relay learns nothing: it
+  sees a random session ID, not an identity. The alternatives were a new
+  server-side mailbox (state and a new trust point on the relay) or putting the
+  owner's candidate addresses into the code (they go stale in minutes and a
+  code lives for days).
+- *The owner has to be online.* Nobody else can add a member: the member list
+  is signed by the owner's key, and the first Hello between the two has to reach
+  the owner anyway. Making joining work with the owner offline would need a
+  relay that stores requests, which is a different trust model. The joiner waits
+  and retries every 3 s until the invite expires, and the pending join survives
+  a restart of the service, so "owner comes online later" works; the UI shows
+  "Waiting for the owner to come online".
+- *Signed messages.* JoinRequest is signed by the joiner (proof that the
+  sender owns the key being added) and JoinAccepted by the owner. The token only
+  decides who may knock; it is not trusted for identity. Without the owner's
+  signature, someone who holds a leaked code could answer a joiner while the
+  real owner is offline and make it stop waiting.
+- *Use the friend machinery for the rest.* The owner stores the joiner as a
+  friend with the network pending, the joiner stores the owner as a friend at
+  once, and the existing mutual Hello with the friend flag confirms the
+  friendship. When it is confirmed, the owner adds the member
+  (`AddMember`) and the existing list push, gossip and auto-activation do the
+  rest. So no new trust rule exists: a new network is still accepted only from
+  an active friend who owns it, and a friend can join only with a Hello it
+  could not have forged. The side effect is that both become friends, which is
+  what the users expect anyway.
+- *Relay only.* Direct paths need candidates, which the two sides exchange only
+  after they know each other. An invite exchange is a few small frames, so the
+  relay is fast enough. If no relay is reachable, redeeming keeps trying. The
+  code carries no relay hints, so owner and joiner meet at a relay both use,
+  normally the build's default relay; an owner whose only relay is a private one
+  cannot be joined by invite until the friend adds that relay as a custom
+  relay.
+- *Two parties per session.* The relay session holds the owner and one joiner.
+  A second joiner at the same moment gets `SessionFull`; the joiner registers
+  the session again every 3 s and gets in as soon as the first one has
+  unregistered after its acceptance. A clean exit now unregisters all sessions
+  (pair sessions too), because a restarted owner otherwise waited 30 s for the
+  stale registration of its previous run to expire.
+
+**Security:**
+
+- The token is a bearer secret, like a Hamachi password. Whoever has the code
+  can ask to join while the owner is online, so share it only with people you
+  would add anyway. The owner is not asked per request; that is the point.
+- Limits: the code expires after 7 days; the owner can reset it at any time,
+  which makes the old code useless at once (nobody serves its session) but keeps
+  people who joined already; at most 30 new joiners per invite per hour; the
+  request timestamp must be within 10 minutes; a full network refuses.
+- The owner can remove any member as before. A removed member who still has a
+  valid code can ask again, so remove-and-reset is the way to lock someone out.
+- A holder of the code can do no more than become a member, which is what
+  the owner meant to allow; it cannot change the list, remove anyone or act as
+  the owner.
+- The invite key protects the exchange only against outsiders (the relay and
+  the network); the joiner's nickname and key are visible to anyone with the
+  code. That is acceptable for a bearer secret that is shared in a chat.
+
+**Not done:** per-request approval by the owner, a per-person single-use code,
+and joining while the owner is offline (see above).

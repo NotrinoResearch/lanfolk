@@ -20,6 +20,7 @@ import (
 
 	"github.com/NotrinoResearch/lanfolk/internal/clock"
 	"github.com/NotrinoResearch/lanfolk/internal/identity"
+	"github.com/NotrinoResearch/lanfolk/internal/invite"
 	"github.com/NotrinoResearch/lanfolk/internal/network"
 	"github.com/NotrinoResearch/lanfolk/internal/pathmgr"
 	"github.com/NotrinoResearch/lanfolk/internal/store"
@@ -56,6 +57,8 @@ type Config struct {
 	// StartCapture starts global broadcast capture (Windows capture mode);
 	// nil disables it. It must call deliver for each captured IPv4 packet.
 	StartCapture func(ctx context.Context, deliver func([]byte)) (stop func(), err error)
+	// InviteTTL overrides how long new invite codes are valid (tests).
+	InviteTTL time.Duration
 	// Test hooks.
 	LoopbackCandidates bool
 	DisablePortMapping bool
@@ -109,6 +112,17 @@ type Engine struct {
 	byAddr  atomic.Pointer[map[netip.AddrPort]*peer]
 	relayIx atomic.Pointer[[]*relayConn]
 
+	// Invites (invite.go). All guarded by mu except inviteIx and the
+	// counters.
+	owned      map[network.ID]invite.Code  // invites of networks we own
+	pending    map[network.ID]*pendingJoin // codes we redeemed
+	invSess    map[wire.SessionID]*inviteSession
+	inviteIx   atomic.Pointer[map[wire.SessionID]*inviteSession]
+	inviteSeq  atomic.Uint64
+	hasPending atomic.Bool // some friend has networks waiting for confirmation
+	joinMu     sync.Mutex
+	joinTimes  map[network.ID][]time.Time
+
 	portmap *portMapper
 	dht     *dhtFallback
 	wg      sync.WaitGroup
@@ -134,12 +148,17 @@ func New(cfg Config) (*Engine, error) {
 	if cfg.DHTAfter <= 0 {
 		cfg.DHTAfter = 30 * time.Second
 	}
+	if cfg.InviteTTL <= 0 {
+		cfg.InviteTTL = invite.TTL
+	}
 	st, err := store.Open(cfg.DataDir)
 	if err != nil {
 		return nil, fmt.Errorf("open data store: %w", err)
 	}
 	e := &Engine{cfg: cfg, log: cfg.Logger, store: st,
-		peers: make(map[identity.PublicKey]*peer), lists: make(map[network.ID]*network.List)}
+		peers: make(map[identity.PublicKey]*peer), lists: make(map[network.ID]*network.List),
+		owned: make(map[network.ID]invite.Code), pending: make(map[network.ID]*pendingJoin),
+		invSess: make(map[wire.SessionID]*inviteSession), joinTimes: make(map[network.ID][]time.Time)}
 	var b [8]byte
 	rand.Read(b[:])
 	// Boot IDs grow over time so a receiver can reject frames from an older
@@ -163,6 +182,7 @@ func New(cfg Config) (*Engine, error) {
 			e.active = l
 		}
 	}
+	e.loadInvites(d)
 	if err := e.openSocket(); err != nil {
 		return nil, err
 	}
@@ -249,17 +269,19 @@ func (e *Engine) Socket() *transport.Socket { return e.sock }
 
 // Run processes traffic until ctx is cancelled.
 func (e *Engine) Run(ctx context.Context) error {
-	e.ctx = ctx
+	// ctx is read under mu by calls that arrive before Run (the control
+	// server starts first), so it is set under mu too.
 	e.mu.Lock()
+	e.ctx = ctx
 	e.applyRelaysLocked()
 	e.reconcileLocked()
 	e.mu.Unlock()
 	e.refreshCandidates(true)
+	e.mu.Lock()
 	if e.active != nil {
-		e.mu.Lock()
 		e.startTunnelLocked()
-		e.mu.Unlock()
 	}
+	e.mu.Unlock()
 	e.wg.Add(1)
 	go func() { defer e.wg.Done(); e.sock.Run(e.onPacket) }()
 	if !e.cfg.DisablePortMapping {
@@ -279,6 +301,17 @@ func (e *Engine) shutdown() {
 		e.sendBye(p)
 	}
 	e.stopTunnelLocked()
+	// Free the session slots at once. Otherwise the relay keeps the old
+	// registration (a second party for the same session) until it is stale,
+	// and a restarted client would be rejected as SessionFull meanwhile.
+	for _, r := range e.relays {
+		for _, p := range e.peers {
+			r.client.Unregister(p.sid)
+		}
+		for sid := range e.invSess {
+			r.client.Unregister(sid)
+		}
+	}
 	for _, r := range e.relays {
 		r.stop()
 	}
@@ -318,6 +351,7 @@ func (e *Engine) tickSlow() {
 	for _, p := range peers {
 		e.peerHousekeeping(p, now)
 	}
+	e.tickInvites(now)
 	e.refreshCandidates(false)
 	e.sendRelayOffers(now)
 	if e.dht != nil {

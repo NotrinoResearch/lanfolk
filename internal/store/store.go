@@ -39,6 +39,31 @@ type Friend struct {
 	AddedAt     time.Time `json:"added_at"`
 	LastSeenAt  time.Time `json:"last_seen_at,omitempty"`
 	ConfirmedAt time.Time `json:"confirmed_at,omitempty"`
+	// PendingNetworks lists owned networks (hex IDs) this friend asked to
+	// join with an invite code. The friend is added to each as soon as the
+	// friendship is active (docs/DECISIONS.md D-025).
+	PendingNetworks []string `json:"pending_networks,omitempty"`
+}
+
+// Invite is the invite code an owner created for one owned network.
+type Invite struct {
+	NetworkID string    `json:"network_id"`
+	Code      string    `json:"code"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// PendingJoin is an invite code the local user redeemed. State is "waiting"
+// (the owner has not answered yet), "joining" (the owner accepted, the member
+// list is on its way), "joined" or "expired".
+type PendingJoin struct {
+	NetworkID     string    `json:"network_id"`
+	OwnerKey      string    `json:"owner_key"`
+	Code          string    `json:"code"`
+	State         string    `json:"state"`
+	NetworkName   string    `json:"network_name,omitempty"`
+	OwnerNickname string    `json:"owner_nickname,omitempty"`
+	ExpiresAt     time.Time `json:"expires_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
 }
 
 // Network is one private network; SignedList is the owner-signed member
@@ -97,6 +122,8 @@ type Data struct {
 	Members       []Member         `json:"members"`
 	PeerCache     []PeerCacheEntry `json:"peer_cache"`
 	Settings      Settings         `json:"settings"`
+	Invites       []Invite         `json:"invites,omitempty"`
+	PendingJoins  []PendingJoin    `json:"pending_joins,omitempty"`
 	// OwnerSID is the Windows account allowed to control the service through
 	// the pipe (recorded at install, or by the first client).
 	OwnerSID string `json:"owner_sid,omitempty"`

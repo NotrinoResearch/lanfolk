@@ -585,6 +585,7 @@ Deviations and decisions so far. See [DECISIONS.md](DECISIONS.md) for details.
 | D-022 | Installer | 32-bit NSIS installer for 64-bit binaries |
 | D-023 | Security | Control pipe limited to the installing user and administrators |
 | D-024 | Development | Service flags for running several instances on one machine |
+| D-025 | Onboarding | One `lanfolk-i1` invite code replaces the friend-code exchange and manual add; rendezvous in a relay session derived from the code's token, owner must be online, bearer token with 7-day expiry and reset |
 
 ## Test plan
 
