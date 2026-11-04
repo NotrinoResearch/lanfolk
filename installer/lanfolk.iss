@@ -109,7 +109,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 SetupAppTitle=Set up {#AppName}
 SetupWindowTitle=Set up %1
 WelcomeLabel1=Welcome to {#AppName}
-WelcomeLabel2=Lanfolk puts you and your friends on one private local network over the internet, so LAN games just work. Setup installs the Lanfolk service, the app and the Wintun network driver.%n%nClick Next to continue.
+WelcomeLabel2=Lanfolk puts you and your friends on one private local network over the internet, so LAN games just work. Setup installs the Lanfolk service, the app and the Wintun network driver.
 SelectTasksLabel2=Choose how Lanfolk fits into Windows. You can run Setup again later to change these.
 FinishedHeadingLabel=You are all set
 FinishedLabel=Lanfolk is ready. Create a network and send the invite to your friends, or paste an invite you received.
@@ -260,6 +260,27 @@ begin
   end;
 end;
 
+// WaitForServiceExit gives a removed service's process up to 5 seconds to
+// exit, then ends it (taskkill exit code 128 means no such process).
+procedure WaitForServiceExit;
+var
+  TaskKill: String;
+  ResultCode, I: Integer;
+begin
+  TaskKill := ExpandConstant('{sys}\taskkill.exe');
+  for I := 1 to 10 do
+  begin
+    // Without /F taskkill cannot end a service process, but its exit code
+    // tells whether one is running (128: not found).
+    if not Exec(TaskKill, '/IM "' + ServiceExeName + '"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+      Exit;
+    if ResultCode = 128 then
+      Exit;
+    Sleep(500);
+  end;
+  Exec(TaskKill, '/F /IM "' + ServiceExeName + '"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+end;
+
 // Stops and removes a service registered by the lanfolk-service.exe in Dir.
 // The data folder is not touched. Returns True when there was nothing to do
 // or the removal succeeded.
@@ -276,6 +297,11 @@ begin
     ExitCode := RunCaptured(Exe, 'uninstall', Output);
     Result := ExitCode = 0;
   end;
+  // The service process can outlive its removal for a moment and keep
+  // lanfolk-service.exe and wintun.dll open, which leaves the program folder
+  // behind until the next restart. The service is gone at this point, so
+  // end any process that is left.
+  WaitForServiceExit;
 end;
 
 // ---------------------------------------------------------------- PATH ----
@@ -538,7 +564,10 @@ begin
   if CurUninstallStep = usPostUninstall then
   begin
     // 3. Files, shortcuts and the Run value are removed by the uninstaller.
+    //    It only removes {app} when it created it; a folder made by the old
+    //    NSIS installer would stay behind empty. RemoveDir needs it empty.
     RemoveFromPath(AppDir);
+    RemoveDir(AppDir);
     // 4. Ask about the user data.
     DeleteUserDataIfWanted;
   end;

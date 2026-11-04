@@ -37,7 +37,60 @@ Observations so far:
 Run in an elevated shell with `wintun.dll` next to `lanprobe.exe` and paste
 the table it prints.
 
-_Not run yet: needs administrator rights._
+2026-11-04, Windows 11 Pro 10.0.26300, Wintun driver 0.14, Lanfolk 0.1.0
+(`lanprobe` from the installed build; the Lanfolk service was stopped during
+the test):
+
+| Test | Default metric (5) | Metric 1 (compatibility mode) |
+| --- | --- | --- |
+| (a) App socket (0.0.0.0) to 10.77.0.255 read from adapter | yes | yes |
+| (a) Socket bound to 10.77.0.2 to 10.77.0.255 read from adapter | yes | yes |
+| (b) App socket (0.0.0.0) to 255.255.255.255 read from adapter | **no** | yes |
+| (b) Socket bound to 10.77.0.2 to 255.255.255.255 read from adapter | yes | yes |
+| (c) Multicast 239.255.77.77 with IP_MULTICAST_IF=10.77.0.2 read from adapter | yes | yes |
+| (c) Multicast 239.255.77.77 on the default interface read from adapter | yes | yes |
+| (d) Broadcast written into adapter (dst 10.77.0.255), socket bound to 0.0.0.0 | yes | (not affected) |
+| (d) Broadcast written into adapter (dst 10.77.0.255), socket bound to 10.77.0.2 | yes | (not affected) |
+| (d) Broadcast written into adapter (dst 255.255.255.255), socket bound to 0.0.0.0 | yes | (not affected) |
+| (d) Broadcast written into adapter (dst 255.255.255.255), socket bound to 10.77.0.2 | yes | (not affected) |
+| (d) Socket bound to the broadcast address itself | n/a (bind not allowed by Windows) | (not affected) |
+| (e) Multicast written into adapter (dst 239.255.77.77), socket joined on 10.77.0.2 | yes | (not affected) |
+
+Observation: the only behavior that depends on the metric is a global
+broadcast (255.255.255.255) sent from a socket bound to 0.0.0.0: Windows sends
+it out of the lowest-metric interface, so it reaches Lanfolk only with metric
+1. That is exactly what compatibility mode is for. Receiving broadcast and
+multicast works with the normal metric.
+
+### Elevated Windows network checks (TESTING.md section 4)
+
+2026-11-04, same machine, Lanfolk 0.1.0 and 0.2.0, an active network:
+
+| Check | Result |
+| --- | --- |
+| Adapter | `Lanfolk`, Up, 10.77.0.2/24, IP MTU 1380 |
+| Metric | 9000 with automatic metric disabled; 1 with compatibility mode on; back to 9000 when it is turned off |
+| Stopping the service | the adapter is removed |
+| Routes | 10.77.0.0/24, its host and broadcast routes, 224.0.0.0/4, 255.255.255.255/32; no default route |
+| Network profile | Private |
+| Firewall | exactly 6 enabled rules in group `Lanfolk` with the expected names |
+| `go test ./internal/winnet/` elevated | 49 passed, 1 skipped, 0 failed |
+
+Not run: SMB/RDP reachability from a second machine (needs two machines).
+
+### Installer (TESTING.md section 7, on the development machine)
+
+2026-11-04, Windows 11 Pro 10.0.26300, `Lanfolk-0.2.0-setup.exe` (Inno Setup),
+silent mode. This is not the clean-VM test of section 7; it covers upgrade,
+uninstall and reinstall on a used machine.
+
+| Step | Result |
+| --- | --- |
+| Upgrade over the 0.1.0 NSIS install | exit 0; service running and automatic; 6 firewall rules; old NSIS Apps entry removed, one Inno entry (0.2.0); PATH entry and Run value added; identity (friend code) unchanged |
+| `lanprobe` from a new shell | found on PATH |
+| Uninstall, data kept (silent default) | service, adapter, firewall rules, PATH entry, Run value, Start Menu folder and Apps entry removed; `%ProgramData%\Lanfolk` kept; no files left and no delete pending a restart. An empty `C:\Program Files\Lanfolk` stayed because the old NSIS installer had created it; fixed in the script (`RemoveDir`), not re-verified yet |
+| Install again | identity unchanged |
+| First start of the new app | the welcome screen asks for a name |
 
 ## LAN behaviors between two machines (Phase 7, `lanprobe test`)
 

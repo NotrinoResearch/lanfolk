@@ -386,8 +386,8 @@ Read this file to connect to the VPS and deploy the relay. Use `ip` as `RELAY_PU
   - *Deviation (D-018):* filtering behavior is not measured, because the relay answers from a single address.
 - [x] Build `lanprobe`: unicast, subnet broadcast, global broadcast and multicast
   - It also checks IP in payload, the private range and the blocked SMB/RDP ports, and `lanprobe latency -compare` measures tunnel overhead. Verified on one machine; the two-machine run waits for the client.
-- [ ] Test broadcast and multicast send and receive through Wintun
-  - `lanprobe wintun-selftest` is ready. It needs an elevated shell and `wintun.dll`, so it has not run yet.
+- [x] Test broadcast and multicast send and receive through Wintun
+  - Ran elevated on 2026-11-04 (Windows 11 26300, Wintun 0.14): every send and receive case works with the normal metric except a global broadcast from a socket bound to 0.0.0.0, which needs metric 1 (compatibility mode). Table in MEASUREMENTS.md.
 - [ ] Verify plain WireGuard traffic can pass through test lines
 - [ ] `[Human]` Run `natprobe` on Türk Telekom, Superonline, TurkNet, Vodafone and mobile lines
 
@@ -395,8 +395,8 @@ Read this file to connect to the VPS and deploy the relay. Use `ip` as `RELAY_PU
 
 ### Phase 1: Static tunnel
 
-- [ ] Create the Wintun adapter and assign IP and MTU
-  - Implemented (`internal/winnet`, `internal/engine`); it needs an elevated run on real Windows before it is ticked.
+- [x] Create the Wintun adapter and assign IP and MTU
+  - Verified on real Windows 11 (2026-11-04): adapter `Lanfolk` up, 10.77.0.2/24, IP MTU 1380, no default route; removed when the service stops. Elevated `internal/winnet` tests pass.
 - [x] Integrate wireguard-go with a custom `conn.Bind`
   - WireGuard peers use endpoints that name the peer; the path manager picks the address at send time.
 - [x] Connect two manually configured clients
@@ -503,10 +503,10 @@ Read this file to connect to the VPS and deploy the relay. Use `ip` as `RELAY_PU
   - Copying is tested with real WireGuard devices. The loopback capture of 255.255.255.255 needs an elevated run.
 - [x] Write incoming packets to the adapter
   - Tested with in-memory adapters; `lanprobe wintun-selftest` checks Wintun.
-- [ ] Implement compatibility mode and metric restoration
-  - Implemented; it needs an elevated run on real Windows before it is ticked.
-- [ ] Configure Private profile and firewall rule for the adapter
-  - Implemented in `internal/winnet` and unit tested. It needs an elevated run on real Windows before it is ticked.
+- [x] Implement compatibility mode and metric restoration
+  - Verified on real Windows 11: metric 9000 (automatic metric off), 1 with compatibility mode, back to 9000 when it is turned off.
+- [x] Configure Private profile and firewall rule for the adapter
+  - Verified on real Windows 11: profile Private, exactly the 6 rules of group `Lanfolk`. SMB/RDP reachability from a second machine is still to be checked (Phase 7 two-machine test).
   - *Deviation (D-016):* the allow rule also covers 255.255.255.255 and 224.0.0.0/4 as local addresses.
 - [x] Add the denylist port filter
   - Enforced inside the tunnel in both directions (tested) and by firewall rules (needs an elevated run).
@@ -527,7 +527,7 @@ Read this file to connect to the VPS and deploy the relay. Use `ip` as `RELAY_PU
   - *Deviation (D-015):* custom relays are a list, and the DHT fallback and port mapping are switches too.
 - [x] Add diagnostic report export
 - [ ] Build the Windows installer, service registration and uninstaller
-  - The Inno Setup script (`installer/lanfolk.iss`, D-026, replaces the NSIS script of D-022) compiles and `lanfolk-service install`/`uninstall` exist. It has not run on a clean Windows VM yet.
+  - The Inno Setup script (`installer/lanfolk.iss`, D-026, replaces the NSIS script of D-022) builds `Lanfolk-0.2.0-setup.exe`. On the development machine it upgraded the 0.1.0 NSIS install, uninstalled (keeping data) and reinstalled with the identity kept (MEASUREMENTS.md). Not yet run on a clean Windows VM (Windows Sandbox is being enabled for that).
 
 **Gate:** On clean Windows, setup, adding friends, creating a network and uninstalling all work.
 
