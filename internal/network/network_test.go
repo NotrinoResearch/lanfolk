@@ -183,3 +183,35 @@ func TestIsVirtual(t *testing.T) {
 		t.Fatal("broadcast")
 	}
 }
+
+func TestOwnerRelays(t *testing.T) {
+	owner := mustKey(t)
+	l, _ := New(owner, "o", "n")
+	relays := []Relay{{Host: "relay.example.org", UDPPort: 3478, TCPPort: 443}, {Host: "203.0.113.9", UDPPort: 3478}}
+	if err := l.SetRelays(owner, relays); err != nil {
+		t.Fatal(err)
+	}
+	if l.Version != 2 {
+		t.Fatalf("version %d", l.Version)
+	}
+	dec, err := Unmarshal(l.Marshal())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(dec.Relays) != 2 || dec.Relays[0] != relays[0] || dec.Relays[1] != relays[1] {
+		t.Fatalf("relays %+v", dec.Relays)
+	}
+	if err := l.SetRelays(mustKey(t), nil); err == nil {
+		t.Fatal("non-owner changed relays")
+	}
+	four := append(relays, relays...)
+	if err := l.SetRelays(owner, four); err == nil {
+		t.Fatal("more than three relays accepted")
+	}
+	if err := l.SetRelays(owner, []Relay{{Host: "bad host;rm", UDPPort: 1}}); err == nil {
+		t.Fatal("invalid host accepted")
+	}
+	if err := l.SetRelays(owner, []Relay{{Host: "ok.example", UDPPort: 0}}); err == nil {
+		t.Fatal("missing UDP port accepted")
+	}
+}

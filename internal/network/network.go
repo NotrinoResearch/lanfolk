@@ -63,6 +63,18 @@ type Member struct {
 	VirtualIP netip.Addr
 }
 
+// MaxRelays is the number of owner-provided relays a list can carry.
+const MaxRelays = 3
+
+// Relay is a shared relay chosen by the network owner. Every member
+// registers at the network's relays so that members always meet at the same
+// relay, in addition to their default relay.
+type Relay struct {
+	Host    string // IP address or DNS name
+	UDPPort uint16
+	TCPPort uint16 // 0 disables the TCP fallback
+}
+
 // List is the owner-signed description of a network.
 type List struct {
 	ID        ID
@@ -70,6 +82,7 @@ type List struct {
 	Owner     identity.PublicKey
 	Version   uint64
 	Members   []Member
+	Relays    []Relay
 	Signature []byte
 }
 
@@ -106,6 +119,7 @@ func truncate(s string, n int) string {
 func (l *List) Clone() *List {
 	c := *l
 	c.Members = append([]Member(nil), l.Members...)
+	c.Relays = append([]Relay(nil), l.Relays...)
 	c.Signature = append([]byte(nil), l.Signature...)
 	return &c
 }
@@ -189,6 +203,45 @@ func (l *List) RemoveMember(owner *identity.PrivateKey, pk identity.PublicKey) e
 	return nil
 }
 
+// SetRelays replaces the owner-provided relays, bumps the version and
+// re-signs the list.
+func (l *List) SetRelays(owner *identity.PrivateKey, relays []Relay) error {
+	if err := l.checkOwner(owner); err != nil {
+		return err
+	}
+	if len(relays) > MaxRelays {
+		return fmt.Errorf("at most %d relays per network", MaxRelays)
+	}
+	for _, r := range relays {
+		if err := r.Validate(); err != nil {
+			return err
+		}
+	}
+	l.Relays = append([]Relay(nil), relays...)
+	l.Version++
+	l.Sign(owner)
+	return nil
+}
+
+// MaxRelayHostLen bounds relay host names.
+const MaxRelayHostLen = 253
+
+// Validate checks a relay entry.
+func (r Relay) Validate() error {
+	if r.Host == "" || len(r.Host) > MaxRelayHostLen {
+		return errors.New("relay host is required")
+	}
+	for _, c := range r.Host {
+		if !(c == '.' || c == '-' || c == ':' || c >= '0' && c <= '9' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z') {
+			return fmt.Errorf("invalid character in relay host %q", r.Host)
+		}
+	}
+	if r.UDPPort == 0 {
+		return errors.New("relay UDP port is required")
+	}
+	return nil
+}
+
 // Rename changes the display name.
 func (l *List) Rename(owner *identity.PrivateKey, name string) error {
 	if err := l.checkOwner(owner); err != nil {
@@ -237,6 +290,13 @@ func (l *List) body() []byte {
 		b.WriteByte(byte(len(m.Nickname)))
 		b.WriteString(m.Nickname)
 	}
+	b.WriteByte(byte(len(l.Relays)))
+	for _, r := range l.Relays {
+		b.WriteByte(byte(len(r.Host)))
+		b.WriteString(r.Host)
+		binary.Write(&b, binary.BigEndian, r.UDPPort)
+		binary.Write(&b, binary.BigEndian, r.TCPPort)
+	}
 	return b.Bytes()
 }
 
@@ -279,6 +339,14 @@ func (l *List) validate() error {
 		}
 		keys[m.PublicKey] = true
 		ips[m.VirtualIP] = true
+	}
+	if len(l.Relays) > MaxRelays {
+		return errors.New("too many relays")
+	}
+	for _, r := range l.Relays {
+		if err := r.Validate(); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -331,6 +399,26 @@ func Unmarshal(b []byte) (*List, error) {
 			return nil, err
 		}
 		l.Members = append(l.Members, m)
+	}
+	nr, err := r.ReadByte()
+	if err != nil {
+		return nil, errShort
+	}
+	if nr > MaxRelays {
+		return nil, errors.New("too many relays")
+	}
+	for i := 0; i < int(nr); i++ {
+		var rl Relay
+		if rl.Host, err = readStr(r, MaxRelayHostLen); err != nil {
+			return nil, err
+		}
+		if err := binary.Read(r, binary.BigEndian, &rl.UDPPort); err != nil {
+			return nil, errShort
+		}
+		if err := binary.Read(r, binary.BigEndian, &rl.TCPPort); err != nil {
+			return nil, errShort
+		}
+		l.Relays = append(l.Relays, rl)
 	}
 	l.Signature = make([]byte, 64)
 	if _, err := io.ReadFull(r, l.Signature); err != nil {

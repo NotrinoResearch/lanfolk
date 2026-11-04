@@ -169,6 +169,7 @@ type path struct {
 	lastRTT    int64
 	wasAlive   bool
 	everAlive  bool
+	relay      uint8 // shared relay: index in the effective relay list
 	present    bool  // shared relay: the peer is registered too
 	advertised int64 // member relay: relaying member's RTT to the peer
 	offerAt    int64
@@ -181,6 +182,7 @@ type PathInfo struct {
 	Addr       netip.AddrPort
 	Via        identity.PublicKey
 	Source     Source
+	Relay      uint8 // shared relay index
 	Alive      bool
 	Active     bool
 	SRTT       time.Duration
@@ -312,20 +314,35 @@ func (m *Manager) FindDirect(addr netip.AddrPort) (PathID, bool) {
 	return 0, false
 }
 
-func (m *Manager) relayPath() *path {
+func isShared(k Kind) bool { return k == SharedRelay || k == SharedRelayTCP }
+
+func (m *Manager) relayPath(relay uint8) *path {
 	for _, id := range m.order {
-		if p := m.paths[id]; p.kind == SharedRelay || p.kind == SharedRelayTCP {
+		if p := m.paths[id]; isShared(p.kind) && p.relay == relay {
 			return p
 		}
 	}
 	return nil
 }
 
-// SetSharedRelay updates the shared relay path. kind is SharedRelay,
-// SharedRelayTCP, or 0 when the relay is unreachable. present reports
-// whether the peer is registered at the relay. It returns the path ID.
-func (m *Manager) SetSharedRelay(kind Kind, present bool, now int64) PathID {
-	p := m.relayPath()
+// bootstrapRelay returns the highest-priority shared relay at which the
+// peer is present.
+func (m *Manager) bootstrapRelay() *path {
+	var best *path
+	for _, id := range m.order {
+		if p := m.paths[id]; isShared(p.kind) && p.present && (best == nil || p.relay < best.relay) {
+			best = p
+		}
+	}
+	return best
+}
+
+// SetSharedRelay updates the path through shared relay number relay (its
+// index in the effective relay list; lower is preferred before RTTs are
+// known). kind is SharedRelay, SharedRelayTCP, or 0 when that relay is
+// unreachable. present reports whether the peer is registered there.
+func (m *Manager) SetSharedRelay(relay uint8, kind Kind, present bool, now int64) PathID {
+	p := m.relayPath(relay)
 	if kind == 0 {
 		if p != nil {
 			m.remove(p.id)
@@ -333,7 +350,7 @@ func (m *Manager) SetSharedRelay(kind Kind, present bool, now int64) PathID {
 		return 0
 	}
 	if p == nil {
-		return m.add(&path{kind: kind, present: present}, now)
+		return m.add(&path{kind: kind, relay: relay, present: present}, now)
 	}
 	if p.kind != kind {
 		// Transport changed; old measurements do not apply.
@@ -388,10 +405,8 @@ func (m *Manager) deadAfter(p *path) int64 {
 }
 
 func (m *Manager) alive(p *path, now int64) bool {
-	if p.kind == SharedRelay || p.kind == SharedRelayTCP {
-		if !p.present {
-			return false
-		}
+	if isShared(p.kind) && !p.present {
+		return false
 	}
 	return p.lastRecv != 0 && now-p.lastRecv < m.deadAfter(p)
 }
@@ -400,7 +415,7 @@ func (m *Manager) probeable(p *path) bool {
 	if m.cfg.RelayOnly && p.kind == Direct {
 		return false
 	}
-	if (p.kind == SharedRelay || p.kind == SharedRelayTCP) && !p.present {
+	if isShared(p.kind) && !p.present {
 		return false
 	}
 	return true
@@ -544,7 +559,7 @@ func (m *Manager) selectPath(now int64) {
 	default:
 		// Nothing measured yet: start on the shared relay if the peer is
 		// registered there, so traffic flows while probes run.
-		if rp := m.relayPath(); rp != nil && rp.present {
+		if rp := m.bootstrapRelay(); rp != nil {
 			choice = rp
 		}
 	}
@@ -572,7 +587,7 @@ func (m *Manager) selectPath(now int64) {
 
 func (m *Manager) info(p *path, now int64) PathInfo {
 	return PathInfo{
-		ID: p.id, Kind: p.kind, Addr: p.addr, Via: p.via, Source: p.source,
+		ID: p.id, Kind: p.kind, Addr: p.addr, Via: p.via, Source: p.source, Relay: p.relay,
 		Alive: m.alive(p, now), Active: p == m.active,
 		SRTT: time.Duration(p.srtt), LastRTT: time.Duration(p.lastRTT), Advertised: time.Duration(p.advertised),
 	}
@@ -610,6 +625,7 @@ func (m *Manager) Paths(now int64) []PathInfo {
 // Stats describes the active path over the statistics window.
 type Stats struct {
 	Kind      Kind
+	Relay     uint8
 	Via       identity.PublicKey
 	Addr      netip.AddrPort
 	LatestRTT time.Duration
@@ -626,7 +642,7 @@ func (m *Manager) Stats(now int64) Stats {
 	if p == nil {
 		return Stats{}
 	}
-	st := Stats{Kind: p.kind, Via: p.via, Addr: p.addr, LatestRTT: time.Duration(p.lastRTT)}
+	st := Stats{Kind: p.kind, Relay: p.relay, Via: p.via, Addr: p.addr, LatestRTT: time.Duration(p.lastRTT)}
 	from := now - int64(m.cfg.StatsWindow)
 	grace := now - int64(time.Second)
 	var sum, jitterSum int64

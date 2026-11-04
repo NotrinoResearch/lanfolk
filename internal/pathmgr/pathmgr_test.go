@@ -96,7 +96,7 @@ func TestBurstThenBackoff(t *testing.T) {
 
 func TestStartsOnSharedRelayBeforeMeasurements(t *testing.T) {
 	s := newSim(t, DefaultConfig())
-	s.m.SetSharedRelay(SharedRelay, true, s.now)
+	s.m.SetSharedRelay(0, SharedRelay, true, s.now)
 	s.run(10 * time.Millisecond)
 	if a := s.active(); a.Kind != SharedRelay {
 		t.Fatalf("active %v", a.Kind)
@@ -114,7 +114,7 @@ func TestPreferDirectUnlessRelayFiveMsBetter(t *testing.T) {
 	}
 	for _, c := range cases {
 		s := newSim(t, DefaultConfig())
-		r := s.m.SetSharedRelay(SharedRelay, true, s.now)
+		r := s.m.SetSharedRelay(0, SharedRelay, true, s.now)
 		d, _ := s.m.AddDirect(addrA, SourceSTUN, s.now)
 		s.rtt[r], s.rtt[d] = c.relay, c.direct
 		s.run(4 * time.Second)
@@ -126,7 +126,7 @@ func TestPreferDirectUnlessRelayFiveMsBetter(t *testing.T) {
 
 func TestFailoverWithinTwoSecondsAndRecovery(t *testing.T) {
 	s := newSim(t, DefaultConfig())
-	r := s.m.SetSharedRelay(SharedRelay, true, s.now)
+	r := s.m.SetSharedRelay(0, SharedRelay, true, s.now)
 	d, _ := s.m.AddDirect(addrA, SourceSTUN, s.now)
 	s.rtt[r], s.rtt[d] = 60*time.Millisecond, 20*time.Millisecond
 	s.run(5 * time.Second)
@@ -171,7 +171,7 @@ func TestRelayOnlyNeverSelectsDirect(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.RelayOnly = true
 	s := newSim(t, cfg)
-	r := s.m.SetSharedRelay(SharedRelay, true, s.now)
+	r := s.m.SetSharedRelay(0, SharedRelay, true, s.now)
 	d, _ := s.m.AddDirect(addrA, SourceSTUN, s.now)
 	s.rtt[r], s.rtt[d] = 80*time.Millisecond, 5*time.Millisecond
 	s.run(5 * time.Second)
@@ -186,7 +186,7 @@ func TestRelayOnlyNeverSelectsDirect(t *testing.T) {
 func TestMemberRelayVersusSharedAndTCPPenalty(t *testing.T) {
 	via, _ := identity.Generate()
 	s := newSim(t, DefaultConfig())
-	r := s.m.SetSharedRelay(SharedRelayTCP, true, s.now)
+	r := s.m.SetSharedRelay(0, SharedRelayTCP, true, s.now)
 	mr := s.m.SetMemberRelay(via.Public(), addrB, 10*time.Millisecond, s.now)
 	s.rtt[r], s.rtt[mr] = 30*time.Millisecond, 35*time.Millisecond
 	s.run(5 * time.Second)
@@ -274,7 +274,7 @@ func TestJitterAndFairQuality(t *testing.T) {
 
 func TestInboundKeepsActivePathAlive(t *testing.T) {
 	s := newSim(t, DefaultConfig())
-	r := s.m.SetSharedRelay(SharedRelay, true, s.now)
+	r := s.m.SetSharedRelay(0, SharedRelay, true, s.now)
 	d, _ := s.m.AddDirect(addrA, SourceSTUN, s.now)
 	s.rtt[r], s.rtt[d] = 60*time.Millisecond, 20*time.Millisecond
 	s.run(4 * time.Second)
@@ -301,5 +301,26 @@ func TestDuplicateCandidatesAndLimit(t *testing.T) {
 	}
 	if n := len(m.Paths(0)); n > MaxDirectPaths+2 {
 		t.Fatalf("%d paths kept", n)
+	}
+}
+
+func TestMultipleSharedRelaysPickLowestRTT(t *testing.T) {
+	s := newSim(t, DefaultConfig())
+	r0 := s.m.SetSharedRelay(0, SharedRelay, true, s.now)
+	r1 := s.m.SetSharedRelay(1, SharedRelay, true, s.now)
+	s.rtt[r0], s.rtt[r1] = 150*time.Millisecond, 20*time.Millisecond
+	s.run(10 * time.Millisecond)
+	if a := s.active(); a.Relay != 0 {
+		t.Fatalf("bootstrap should use the first relay, got %d", a.Relay)
+	}
+	s.run(4 * time.Second)
+	if a := s.active(); a.ID != r1 {
+		t.Fatalf("active relay %d, want the faster relay 1", a.Relay)
+	}
+	// Relay 1 becomes unreachable: traffic moves back to relay 0.
+	s.m.SetSharedRelay(1, 0, false, s.now)
+	s.run(100 * time.Millisecond)
+	if a := s.active(); a.ID != r0 {
+		t.Fatalf("did not fall back to relay 0")
 	}
 }
