@@ -54,6 +54,8 @@ var dev = &Dev{waiting: map[uint64]chan string{}}
 
 func devBindings() []any { return []any{dev} }
 
+func automationAddress() string { return *automationAddr }
+
 // Result is called by the page with the JSON result of an /eval.
 func (d *Dev) Result(id uint64, result string) {
 	d.mu.Lock()
@@ -105,7 +107,11 @@ func startAutomation(host *wailsHost, tr *tray) {
 	rand.Read(b[:])
 	token := hex.EncodeToString(b[:])
 	info, _ := json.Marshal(map[string]string{"addr": ln.Addr().String(), "token": token})
-	os.WriteFile(filepath.Join(os.TempDir(), "lanfolk-automation.json"), info, 0o600)
+	name := "lanfolk-automation.json"
+	if processMode == "settings" {
+		name = "lanfolk-automation-settings.json"
+	}
+	os.WriteFile(filepath.Join(os.TempDir(), name), info, 0o600)
 
 	mux := http.NewServeMux()
 	need := func(w http.ResponseWriter) (context.Context, bool) {
@@ -164,10 +170,18 @@ func startAutomation(host *wailsHost, tr *tray) {
 		io.WriteString(w, "true")
 	})
 	mux.HandleFunc("GET /tray", func(w http.ResponseWriter, r *http.Request) {
+		if tr == nil {
+			http.Error(w, "the Settings window has no tray", http.StatusNotFound)
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(tr.currentModel())
 	})
 	mux.HandleFunc("POST /tray", func(w http.ResponseWriter, r *http.Request) {
+		if tr == nil {
+			http.Error(w, "the Settings window has no tray", http.StatusNotFound)
+			return
+		}
 		if err := tr.simulate(r.URL.Query().Get("item"), r.URL.Query().Get("id")); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return

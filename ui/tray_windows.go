@@ -271,10 +271,7 @@ func (t *tray) doInvite() {
 	t.navigate(map[string]string{"view": "invite", "network_id": id})
 }
 
-func (t *tray) doSettings() {
-	t.showWindow()
-	t.navigate(map[string]string{"view": "settings"})
-}
+func (t *tray) doSettings() { go t.app.OpenSettings() }
 
 // currentModel returns what the tray shows now.
 func (t *tray) currentModel() trayModel {

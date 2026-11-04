@@ -40,6 +40,7 @@ func main() {
 	mock := flag.Bool("mock", false, "preview the UI against a built-in fake service")
 	pipe := flag.String("pipe", "", "service pipe address (default: the Lanfolk service pipe)")
 	minimized := flag.Bool("minimized", false, "start in the notification area without showing the window")
+	settings := flag.Bool("settings", false, "open the Settings window (started by the main window)")
 	flag.Parse()
 	setAppUserModelID()
 
@@ -48,13 +49,20 @@ func main() {
 		addr = ipc.DefaultAddress()
 	}
 	id := instanceID
-	if *mock {
+	if *mock && !*settings {
 		stop, mockAddr, err := startMock()
 		if err != nil {
 			fatal(err)
 		}
 		defer stop()
 		addr, id = mockAddr, mockInstanceID
+	}
+	if *pipe != "" && *pipe != ipc.DefaultAddress() {
+		id += ".custom" // a preview or test service: do not take the real app's lock
+	}
+	ws := windowSpec(*settings)
+	if *settings {
+		processMode = "settings"
 	}
 
 	host := &wailsHost{}
@@ -64,38 +72,47 @@ func main() {
 			tr.observe(e, d)
 		}
 	}})
-	tr = newTray(app, host)
+	app.mode = processMode
+	app.automation = automationAddress()
+	if !*settings {
+		tr = newTray(app, host)
+	}
 
 	bg := &options.RGBA{R: 243, G: 243, B: 243, A: 255}
 	if systemUsesDarkTheme() {
 		bg = &options.RGBA{R: 32, G: 32, B: 32, A: 255}
 	}
 	err := wails.Run(&options.App{
-		Title:             appTitle,
-		Width:             380,
-		Height:            640,
-		MinWidth:          340,
-		MinHeight:         520,
+		Title:             ws.Title,
+		Width:             ws.Width,
+		Height:            ws.Height,
+		MinWidth:          ws.MinWidth,
+		MinHeight:         ws.MinHeight,
 		Frameless:         true,
-		StartHidden:       *minimized,
-		HideWindowOnClose: true, // the close button sends the app to the tray
+		StartHidden:       *minimized && !*settings,
+		HideWindowOnClose: ws.HideOnClose, // the main window closes to the tray
 		BackgroundColour:  bg,
 		AssetServer:       &assetserver.Options{Assets: assets},
 		Bind:              append([]any{app}, devBindings()...),
 		OnStartup: func(ctx context.Context) {
 			host.setContext(ctx)
 			app.start(context.Background())
-			tr.start()
+			if tr != nil {
+				tr.start()
+			}
 			startAutomation(host, tr)
 		},
 		OnShutdown: func(context.Context) {
-			tr.stop()
+			if tr != nil {
+				tr.stop()
+			}
 			app.stop()
 		},
 		SingleInstanceLock: &options.SingleInstanceLock{
-			UniqueId: id,
+			UniqueId: id + ws.InstanceSuffix,
 			OnSecondInstanceLaunch: func(options.SecondInstanceData) {
-				// Starting Lanfolk again (Start menu, desktop) shows the window.
+				// Starting Lanfolk again (Start menu, desktop, the gear in the
+				// main window) shows the running window.
 				if ctx := host.context(); ctx != nil {
 					showWindow(ctx)
 				}
@@ -103,7 +120,7 @@ func main() {
 		},
 		Windows: &windows.Options{
 			Theme:           windows.SystemDefault,
-			WindowClassName: windowClass,
+			WindowClassName: windowClassFor(*settings),
 			// Keep the native shadow, rounded corners and snap layouts of a
 			// framed window while the frontend draws the title bar.
 			DisableFramelessWindowDecorations: false,
@@ -112,6 +129,16 @@ func main() {
 	if err != nil {
 		fatal(err)
 	}
+}
+
+// processMode is "main" or "settings".
+var processMode = "main"
+
+func windowClassFor(settings bool) string {
+	if settings {
+		return windowClass + "Settings"
+	}
+	return windowClass
 }
 
 func fatal(err error) {

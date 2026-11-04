@@ -41,6 +41,11 @@ type App struct {
 	addr string
 	host Host
 
+	// mode is "main" or "settings"; automation is the automation address
+	// of this process, if any (passed on to the Settings window).
+	mode       string
+	automation string
+
 	// Tunables, changed by tests.
 	backoffMin  time.Duration
 	backoffMax  time.Duration

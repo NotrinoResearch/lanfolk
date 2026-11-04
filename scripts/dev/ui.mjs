@@ -3,6 +3,7 @@
 // (built with -tags automation, started with -automation 127.0.0.1:9400).
 // It reads the address and token from %TEMP%\lanfolk-automation.json.
 //
+//   node scripts/dev/ui.mjs [--settings] <command> ...   (--settings: the Settings window)
 //   node scripts/dev/ui.mjs eval "return document.title"
 //   node scripts/dev/ui.mjs click '[data-action="go"][data-view="join"]'
 //   node scripts/dev/ui.mjs type '#jn-code' 'lanfolk-i1...'
@@ -15,7 +16,11 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-const info = JSON.parse(fs.readFileSync(path.join(os.tmpdir(), 'lanfolk-automation.json'), 'utf8'));
+// --settings targets the Settings window (its own process and port).
+const argv = process.argv.slice(2);
+const settingsWin = argv[0] === '--settings';
+if (settingsWin) argv.shift();
+const info = JSON.parse(fs.readFileSync(path.join(os.tmpdir(), settingsWin ? 'lanfolk-automation-settings.json' : 'lanfolk-automation.json'), 'utf8'));
 const base = `http://${info.addr}`;
 const auth = { Authorization: `Bearer ${info.token}` };
 
@@ -26,7 +31,7 @@ async function req(method, p, body) {
 }
 const evalJS = async (js) => (await req('POST', '/eval', js)).json();
 
-const [cmd, ...args] = process.argv.slice(2);
+const [cmd, ...args] = argv;
 let out;
 switch (cmd) {
   case 'eval':

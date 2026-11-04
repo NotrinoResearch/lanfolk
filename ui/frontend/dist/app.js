@@ -1,13 +1,16 @@
 // Lanfolk desktop UI. Plain JavaScript, no build step.
 //
-// The Go side (ui/app.go) is bound as window.go.main.App and forwards every
-// call to the Lanfolk service. State arrives as events: "service", "status",
+// One page, two windows: the compact main window ("main") and the Settings
+// window ("settings", the same executable started with --settings). The Go
+// side (ui/app.go) is bound as window.go.main.App and forwards every call to
+// the Lanfolk service. State arrives as events: "service", "status",
 // "networks", "peers", "friends", "invites", plus "navigate" from the tray.
 //
 // Rendering: each view is a function that returns an HTML string; render()
 // morphs the live DOM toward it, so focus, scroll and typed text survive the
 // once-a-second peer updates. Clicks are handled by delegation on
-// data-action attributes.
+// data-action attributes; actions on a member or friend live in a context
+// menu (the ⋯ button or a right click), never inside the row.
 (function () {
   'use strict';
 
@@ -21,6 +24,7 @@
   };
 
   var S = {
+    mode: null, // "main" | "settings"
     service: null, // {connected, message} once known
     status: null,
     networks: [],
@@ -29,12 +33,14 @@
     invites: [],
     settings: null,
     autostart: null,
-    view: 'home', // home | create | join | invite | settings
+    view: 'home', // main: home | create | join | invite | add-friend
+    tab: 'networks', // home tab: networks | friends
+    page: 'general', // settings window page
     args: {},
     open: {}, // network id -> expanded
-    detail: null, // public key of the member whose details are open
+    detail: null, // "netId/key" or "friend/key" whose details are open
     busy: {},
-    inviteCode: null, // {network_id, code, expires}
+    inviteCode: null,
     copied: null,
     joinError: '',
   };
@@ -68,9 +74,8 @@
     toastTimer = setTimeout(function () { box.innerHTML = ''; }, kind === 'bad' ? 6000 : 2400);
   }
   function fail(e) { toast(errText(e), 'bad'); }
-
   function copy(text, label) {
-    return call('CopyToClipboard', text).then(function () { toast((label || 'Copied') + '', 'ok'); }, fail);
+    return call('CopyToClipboard', text).then(function () { toast(label || 'Copied', 'ok'); }, fail);
   }
 
   // ---------------------------------------------------------------- morph --
@@ -138,9 +143,9 @@
     requestAnimationFrame(function () {
       queued = false;
       var view = $('#view');
-      morph(view, viewHTML());
-      $('#tb-settings').setAttribute('aria-current', S.view === 'settings' ? 'page' : 'false');
-      $('#tb-settings').hidden = !S.service || !S.service.connected || isOnboarding();
+      morph(view, S.mode === 'settings' ? settingsWindowHTML() : mainHTML());
+      var gear = $('#tb-settings');
+      gear.hidden = S.mode !== 'main' || !S.service || !S.service.connected || isOnboarding();
       var auto = view.querySelector('[data-autofocus]');
       if (auto && !view.contains(document.activeElement)) {
         auto.removeAttribute('data-autofocus');
@@ -164,6 +169,15 @@
     for (var i = 0; i < S.peers.length; i++) if (S.peers[i].public_key === k) return S.peers[i];
     return null;
   }
+  function friendByKey(k) {
+    for (var i = 0; i < S.friends.length; i++) if (S.friends[i].public_key === k) return S.friends[i];
+    return null;
+  }
+  function memberOf(net, key) {
+    var ms = (net && net.members) || [];
+    for (var i = 0; i < ms.length; i++) if (ms[i].public_key === key) return ms[i];
+    return null;
+  }
   function openJoins() {
     return S.invites.filter(function (j) {
       if (j.state === 'joined') return false;
@@ -171,7 +185,7 @@
     });
   }
   function isOnboarding() {
-    return !!(S.service && S.service.connected && S.status && !store.get('onboarded') &&
+    return !!(S.mode === 'main' && S.service && S.service.connected && S.status && !store.get('onboarded') &&
       S.networks.length === 0 && openJoins().length === 0);
   }
   function selfState() {
@@ -181,19 +195,33 @@
     if (S.status && !S.status.adapter_up) return { dot: 'connecting', text: 'Connecting to ' + net.name + '…' };
     return { dot: 'online', text: 'Online in ' + net.name };
   }
+  function sortedNetworks() {
+    return S.networks.slice().sort(function (a, b) {
+      if (a.active !== b.active) return a.active ? -1 : 1;
+      return String(a.name).localeCompare(String(b.name), undefined, { sensitivity: 'base' });
+    });
+  }
+  function ownedNetworksWithout(key) {
+    return sortedNetworks().filter(function (n) { return n.is_owner && !memberOf(n, key); });
+  }
+  function friendsOnline() {
+    return S.friends.filter(function (f) { return f.online; }).length;
+  }
 
-  // ---------------------------------------------------------------- views --
+  // ---------------------------------------------------------- main window --
 
-  function viewHTML() {
-    if (!S.service) return '<div class="empty" data-key="loading"><span class="spinner"></span></div>';
+  function loadingHTML() { return '<div class="empty" data-key="loading"><span class="spinner"></span></div>'; }
+
+  function mainHTML() {
+    if (!S.mode || !S.service) return loadingHTML();
     if (!S.service.connected) return offlineHTML();
-    if (!S.status) return '<div class="empty" data-key="loading"><span class="spinner"></span></div>';
+    if (!S.status) return loadingHTML();
     if (isOnboarding() && S.view === 'home') return onboardingHTML();
     switch (S.view) {
       case 'create': return createHTML();
       case 'join': return joinHTML();
       case 'invite': return inviteHTML();
-      case 'settings': return settingsHTML();
+      case 'add-friend': return addFriendHTML();
       default: return homeHTML();
     }
   }
@@ -231,21 +259,45 @@
       (ip ? '<button type="button" class="ip-chip" data-action="copy" data-text="' + esc(ip) + '" data-label="IP address copied" title="Copy your IP address">' + esc(ip) + icon('copy') + '</button>' : '') +
       '</section>';
     html += bannersHTML();
+
     var joins = openJoins();
-    if (S.networks.length === 0 && joins.length === 0) {
+    if (S.networks.length === 0 && joins.length === 0 && S.friends.length === 0) {
       return html + '<div class="empty" data-key="empty">' + mark(44) +
         '<h2>No networks yet</h2><p>Create a network and send your friends the invite, or join with an invite someone sent you.</p>' +
         '<div class="stack"><button type="button" class="btn primary" data-action="go" data-view="create">' + icon('plus') + 'Create a network</button>' +
         '<button type="button" class="btn" data-action="go" data-view="join">' + icon('join') + 'Join with an invite</button></div></div>';
     }
-    html += '<div class="scroll" data-key="list"><div class="list">';
+
+    var fo = friendsOnline();
+    html += '<div class="tabs" role="tablist" data-key="tabs">' +
+      tabHTML('networks', 'Networks', '') +
+      tabHTML('friends', 'Friends', S.friends.length ? String(fo) + ' online' : '') + '</div>';
+
+    if (S.tab === 'friends') {
+      html += '<div class="scroll" data-key="friends-list" role="tabpanel"><div class="list">' + friendsHTML() + '</div></div>';
+      html += '<footer class="actions" data-key="f-actions">' +
+        '<button type="button" class="btn" data-action="copy" data-text="' + esc(S.status.friend_code) + '" data-label="Friend code copied">' + icon('copy') + 'My friend code</button>' +
+        '<button type="button" class="btn primary" data-action="go" data-view="add-friend">' + icon('invite') + 'Add friend</button></footer>';
+      return html;
+    }
+
+    html += '<div class="scroll" data-key="list" role="tabpanel"><div class="list">';
     joins.forEach(function (j) { html += pendingHTML(j); });
+    if (S.networks.length === 0) {
+      html += '<p class="list-empty">You are not in a network yet.</p>';
+    }
     sortedNetworks().forEach(function (n) { html += networkHTML(n); });
     html += '</div></div>';
     html += '<footer class="actions" data-key="actions">' +
       '<button type="button" class="btn" data-action="go" data-view="create">' + icon('plus') + 'Create</button>' +
       '<button type="button" class="btn primary" data-action="go" data-view="join">' + icon('join') + 'Join network</button></footer>';
     return html;
+  }
+
+  function tabHTML(id, label, meta) {
+    var on = S.tab === id;
+    return '<button type="button" role="tab" class="tab' + (on ? ' on' : '') + '" aria-selected="' + on + '" data-action="tab" data-id="' + id + '">' +
+      esc(label) + (meta ? '<span class="tab-meta">' + esc(meta) + '</span>' : '') + '</button>';
   }
 
   function bannersHTML() {
@@ -262,13 +314,6 @@
         '<div>No relay can be reached. Friends with a direct path still connect; others may not until it is back.</div></div>';
     }
     return '';
-  }
-
-  function sortedNetworks() {
-    return S.networks.slice().sort(function (a, b) {
-      if (a.active !== b.active) return a.active ? -1 : 1;
-      return String(a.name).localeCompare(String(b.name), undefined, { sensitivity: 'base' });
-    });
   }
 
   function pendingHTML(j) {
@@ -301,7 +346,7 @@
       html += '<ul class="members">';
       membersOf(n).forEach(function (m) { html += memberHTML(n, m); });
       if (n.is_owner && n.members.length <= 1) {
-        html += '<li class="member" data-key="invite-hint"><button type="button" class="member-row" data-action="invite" data-id="' + esc(n.id) + '">' +
+        html += '<li class="member" data-key="invite-hint"><button type="button" class="member-row hint-row" data-action="invite" data-id="' + esc(n.id) + '">' +
           '<span></span><span class="m-name accent">Invite friends…</span><span></span></button></li>';
       }
       html += '</ul>';
@@ -324,30 +369,6 @@
     return self.concat(rest);
   }
 
-  function memberHTML(n, m) {
-    var key = m.public_key;
-    var open = S.detail === n.id + '/' + key;
-    var dot = 'offline';
-    var right = '';
-    if (m.is_self) {
-      dot = n.active ? selfState().dot : 'offline';
-      right = '';
-    } else if (n.active) {
-      var sum = F.memberSummary(peerByKey(key));
-      dot = sum.state;
-      right = sum.state === 'online'
-        ? '<span class="m-right">' + esc(sum.text) + '<small>' + esc(sum.sub) + '</small></span>'
-        : '<span class="m-right ' + sum.state + '">' + esc(sum.text) + '</span>';
-    }
-    var html = '<li class="member' + (open ? ' open' : '') + '" data-key="m-' + esc(key) + '">' +
-      '<button type="button" class="member-row" data-action="member" data-id="' + esc(n.id) + '" data-key2="' + esc(key) + '" aria-expanded="' + open + '">' +
-      '<span class="dot ' + dot + '" aria-hidden="true"></span>' +
-      '<span class="m-name">' + esc(m.nickname || 'Unnamed') + tagsHTML(m) +
-      '<span class="m-ip">' + esc(m.virtual_ip) + '</span></span>' + right + '</button>';
-    if (open) html += detailHTML(n, m);
-    return html + '</li>';
-  }
-
   function tagsHTML(m) {
     var t = [];
     if (m.is_self) t.push('You');
@@ -355,30 +376,93 @@
     return t.length ? '<small>' + t.join(' · ') + '</small>' : '';
   }
 
-  function detailHTML(n, m) {
+  // A member is one row; selecting it extends the same row downwards with
+  // the connection readout. Actions are in the row's menu.
+  function memberHTML(n, m) {
+    var key = m.public_key;
+    var id = n.id + '/' + key;
+    var open = S.detail === id;
+    var dot = 'offline';
+    var right = '';
+    if (m.is_self) {
+      dot = n.active ? selfState().dot : 'offline';
+    } else if (n.active) {
+      var sum = F.memberSummary(peerByKey(key));
+      dot = sum.state;
+      right = sum.state === 'online'
+        ? '<span class="m-right">' + esc(sum.text) + '<small>' + esc(sum.sub) + '</small></span>'
+        : '<span class="m-right ' + sum.state + '">' + esc(sum.text) + '</span>';
+    }
+    var html = '<li class="member' + (open ? ' open' : '') + '" data-key="m-' + esc(key) + '" data-ctx="member" data-id="' + esc(n.id) + '" data-key2="' + esc(key) + '">' +
+      '<div class="member-line">' +
+      '<button type="button" class="member-row" data-action="member" data-id="' + esc(n.id) + '" data-key2="' + esc(key) + '" aria-expanded="' + open + '">' +
+      '<span class="dot ' + dot + '" aria-hidden="true"></span>' +
+      '<span class="m-name">' + esc(m.nickname || 'Unnamed') + tagsHTML(m) +
+      '<span class="m-ip">' + esc(m.virtual_ip) + '</span></span>' + right + '</button>' +
+      '<button type="button" class="icon-btn row-more" data-action="member-menu" data-id="' + esc(n.id) + '" data-key2="' + esc(key) + '" aria-haspopup="menu" title="More" aria-label="More options for ' + esc(m.nickname) + '">' + icon('more') + '</button>' +
+      '</div>';
+    if (open) html += memberDetailHTML(n, m);
+    return html + '</li>';
+  }
+
+  function memberDetailHTML(n, m) {
     var p = n.active && !m.is_self ? peerByKey(m.public_key) : null;
-    var rows = [['Address', m.virtual_ip]];
+    var cells = [];
     if (p && F.isPeerMeasured(p)) {
       var q = F.qualityBadge(p.quality);
       var via = F.relayDetail(p);
-      rows.push(['Connection', F.pathLabel(p.path) + (via ? ' · ' + via : '')]);
-      rows.push(['Ping', F.formatMs(p.ping_ms) + ' (avg ' + F.formatMs(p.avg_ping_ms) + ')']);
-      rows.push(['Jitter', F.formatMs(p.jitter_ms)]);
-      rows.push(['Packet loss', F.formatPercent(p.loss_pct)]);
-      rows.push(['Quality', '<span class="q-' + q.cls + '">' + esc(q.label) + '</span>', true]);
-    } else if (!m.is_self && n.active) {
-      rows.push(['Connection', p && p.online ? 'Connecting…' : 'Offline']);
+      cells.push(['Connection', F.pathLabel(p.path)]);
+      if (via) cells.push(['Route', via.replace(/^via /, '')]);
+      cells.push(['Average ping', F.formatMs(p.avg_ping_ms)]);
+      cells.push(['Jitter', F.formatMs(p.jitter_ms)]);
+      cells.push(['Packet loss', F.formatPercent(p.loss_pct)]);
+      cells.push(['Quality', '<span class="q-' + q.cls + '">' + esc(q.label) + '</span>', true]);
     } else if (m.is_self) {
-      rows.push(['This is you', n.active ? 'Connected' : 'Not connected']);
+      cells.push(['Status', n.active ? selfState().text : 'Not connected to this network']);
+    } else if (n.active) {
+      cells.push(['Status', p && p.online ? 'Connecting…' : 'Offline']);
+      cells.push(['Seen', friendByKey(m.public_key) ? F.friendPresence(friendByKey(m.public_key), Date.now()) : '—']);
+    } else {
+      cells.push(['Status', 'Connect to this network to see them']);
     }
-    var html = '<div class="detail"><dl class="kv">';
-    rows.forEach(function (r) { html += '<dt>' + esc(r[0]) + '</dt><dd>' + (r[2] ? r[1] : esc(r[1])) + '</dd>'; });
-    html += '</dl><div class="detail-actions">' +
-      '<button type="button" class="btn" data-action="copy" data-text="' + esc(m.virtual_ip) + '" data-label="IP address copied">' + icon('copy') + 'Copy IP</button>';
-    if (n.is_owner && !m.is_self) {
-      html += '<button type="button" class="btn danger" data-action="remove-member" data-id="' + esc(n.id) + '" data-key2="' + esc(m.public_key) + '">' + icon('trash') + 'Remove</button>';
+    var html = '<dl class="readout">';
+    cells.forEach(function (c) {
+      html += '<div><dt>' + esc(c[0]) + '</dt><dd>' + (c[2] ? c[1] : esc(c[1])) + '</dd></div>';
+    });
+    return html + '</dl>';
+  }
+
+  function friendsHTML() {
+    if (!S.friends.length) {
+      return '<div class="empty small" data-key="f-empty"><h2>No friends yet</h2>' +
+        '<p>People you share a network with become friends. You can also add someone with their friend code.</p></div>';
     }
-    return html + '</div></div>';
+    var list = S.friends.slice().sort(function (a, b) {
+      if (!!a.online !== !!b.online) return a.online ? -1 : 1;
+      if ((a.state === 'active') !== (b.state === 'active')) return a.state === 'active' ? -1 : 1;
+      return String(a.nickname).localeCompare(String(b.nickname), undefined, { sensitivity: 'base' });
+    });
+    var html = '<ul class="members friends">';
+    list.forEach(function (f) {
+      var id = 'friend/' + f.public_key;
+      var open = S.detail === id;
+      var pending = f.state !== 'active';
+      var sub = pending ? 'Waiting for them to add you' : F.friendPresence(f, Date.now());
+      html += '<li class="member' + (open ? ' open' : '') + '" data-key="f-' + esc(f.public_key) + '" data-ctx="friend" data-key2="' + esc(f.public_key) + '">' +
+        '<div class="member-line">' +
+        '<button type="button" class="member-row" data-action="friend" data-key2="' + esc(f.public_key) + '" aria-expanded="' + open + '">' +
+        '<span class="dot ' + (f.online ? 'online' : pending ? 'connecting' : 'offline') + '" aria-hidden="true"></span>' +
+        '<span class="m-name">' + esc(f.nickname || 'Unnamed') + '<span class="m-ip">' + esc(sub) + '</span></span><span></span></button>' +
+        '<button type="button" class="icon-btn row-more" data-action="friend-menu" data-key2="' + esc(f.public_key) + '" aria-haspopup="menu" title="More" aria-label="More options for ' + esc(f.nickname) + '">' + icon('more') + '</button>' +
+        '</div>';
+      if (open) {
+        var shared = S.networks.filter(function (n) { return memberOf(n, f.public_key); }).map(function (n) { return n.name; });
+        html += '<dl class="readout"><div><dt>Networks together</dt><dd>' + esc(shared.length ? shared.join(', ') : 'None yet') + '</dd></div>' +
+          '<div><dt>Friends since</dt><dd>' + esc(F.isZeroTime(f.added_at) ? '—' : new Date(f.added_at).toLocaleDateString()) + '</dd></div></dl>';
+      }
+      html += '</li>';
+    });
+    return html + '</ul>';
   }
 
   function subhead(title) {
@@ -416,6 +500,7 @@
     if (!n) return subhead('Invite friends') + '<div class="empty"><p>This network no longer exists.</p></div>';
     var inv = S.inviteCode && S.inviteCode.network_id === n.id ? S.inviteCode : null;
     var copied = S.copied === 'invite';
+    var known = S.friends.filter(function (f) { return f.state === 'active' && !memberOf(n, f.public_key); });
     return subhead('Invite friends') +
       '<div class="form" data-key="invite">' +
       '<p class="lead">Send this code to your friends to let them into <strong>' + esc(n.name) + '</strong>.</p>' +
@@ -426,9 +511,52 @@
       '<ol class="steps"><li>Send it in Discord, WhatsApp or any chat.</li>' +
       '<li>Your friend opens Lanfolk, chooses Join network and pastes it.</li>' +
       '<li>Stay online until they show up in your network.</li></ol>' +
+      (known.length ? '<p class="hint gap-top">Already friends? Add them directly from the Friends tab.</p>' : '') +
       '<div class="grow"></div>' +
       '<button type="button" class="btn primary block" data-action="copy-invite"' + attr('disabled', !inv) + '>' +
       icon(copied ? 'check' : 'copy') + (copied ? 'Copied' : 'Copy invite') + '</button></div>';
+  }
+
+  function addFriendHTML() {
+    return subhead('Add a friend') +
+      '<form class="form" data-form="friend" data-key="add-friend" autocomplete="off">' +
+      '<p class="lead">Paste your friend’s friend code. They have to add yours too before you can play.</p>' +
+      '<div class="field"><label for="af-code">Their friend code</label>' +
+      '<textarea class="textarea" id="af-code" name="code" rows="3" spellcheck="false" placeholder="lanfolk1…" data-autofocus></textarea></div>' +
+      '<div class="field"><label for="af-nick">Name (optional)</label>' +
+      '<input class="input" id="af-nick" name="nick" maxlength="32" spellcheck="false" placeholder="Shown until they connect"></div>' +
+      '<div class="field"><label>Your friend code</label><div class="code-line"><span class="mono selectable grow">' + esc(S.status.friend_code) + '</span>' +
+      '<button type="button" class="icon-btn" data-action="copy" data-text="' + esc(S.status.friend_code) + '" data-label="Friend code copied" title="Copy your friend code" aria-label="Copy your friend code">' + icon('copy') + '</button></div></div>' +
+      '<div class="grow"></div>' +
+      '<button type="submit" class="btn primary block">Add friend</button></form>';
+  }
+
+  // ------------------------------------------------------- settings window --
+
+  var PAGES = [
+    ['general', 'settings', 'General'],
+    ['connection', 'power', 'Connection'],
+    ['relays', 'join', 'Relays'],
+    ['identity', 'invite', 'Identity and backup'],
+    ['troubleshooting', 'warning', 'Troubleshooting'],
+    ['about', 'info', 'About'],
+  ];
+
+  function settingsWindowHTML() {
+    if (!S.mode || !S.service) return loadingHTML();
+    if (!S.service.connected) return offlineHTML();
+    if (!S.status) return loadingHTML();
+    var nav = '<nav class="side" aria-label="Settings pages" data-key="side">';
+    PAGES.forEach(function (p) {
+      var on = S.page === p[0];
+      nav += '<button type="button" class="side-item' + (on ? ' on' : '') + '" data-action="page" data-id="' + p[0] + '"' + (on ? ' aria-current="page"' : '') + '>' +
+        icon(p[1]) + '<span>' + esc(p[2]) + '</span></button>';
+    });
+    nav += '</nav>';
+    var title = '';
+    PAGES.forEach(function (p) { if (p[0] === S.page) title = p[2]; });
+    return '<div class="settings-shell" data-key="shell">' + nav +
+      '<div class="scroll pane" data-key="pane-' + S.page + '"><div class="pane-inner"><h1 class="pane-title">' + esc(title) + '</h1>' + pageHTML(S.page) + '</div></div></div>';
   }
 
   function toggleHTML(name, on, label) {
@@ -440,94 +568,71 @@
       (desc ? '<div class="row-desc">' + desc + '</div>' : '') + '</div>' + control + '</div>';
   }
 
-  function settingsHTML() {
+  function pageHTML(page) {
     var st = S.status;
     var s = S.settings;
-    var html = subhead('Settings') + '<div class="scroll" data-key="settings"><div class="settings">';
-
-    // General: the few things a player may want to change.
-    html += '<section class="group" data-key="g-general"><h2>General</h2><div class="card">' +
-      rowHTML('Nickname', 'Friends and members see this name.',
-        '<input class="input" data-field="nickname" maxlength="32" value="' + esc(st.nickname) + '" spellcheck="false" aria-label="Nickname">', 'nick') +
-      rowHTML('Open at sign-in', 'Start Lanfolk in the notification area when you sign in to Windows.',
-        S.autostart == null ? '' : toggleHTML('autostart', S.autostart, 'Open at sign-in'), 'auto');
-    if (s) {
-      html += rowHTML('Compatibility mode', 'Turn on if a game does not find the others. Sends all broadcast traffic through Lanfolk.',
-          toggleHTML('compat_mode', s.compat_mode, 'Compatibility mode'), 'compat') +
-        rowHTML('Relay only', 'Hides your IP address from members. Adds latency.', toggleHTML('relay_only', s.relay_only, 'Relay only'), 'ro');
+    switch (page) {
+      case 'general':
+        return '<div class="card">' +
+          rowHTML('Nickname', 'Friends and members see this name.',
+            '<input class="input" data-field="nickname" maxlength="32" value="' + esc(st.nickname) + '" spellcheck="false" aria-label="Nickname">', 'nick') +
+          rowHTML('Open at sign-in', 'Start Lanfolk in the notification area when you sign in to Windows.',
+            S.autostart == null ? '' : toggleHTML('autostart', S.autostart, 'Open at sign-in'), 'auto') +
+          (s ? rowHTML('Compatibility mode', 'Turn on if a game does not find the others. Sends all broadcast traffic through Lanfolk.',
+            toggleHTML('compat_mode', s.compat_mode, 'Compatibility mode'), 'compat') : '') +
+          '</div>';
+      case 'connection':
+        if (!s) return loadingHTML();
+        return '<div class="card">' +
+          rowHTML('Relay only', 'Hides your IP address from members. Adds latency.', toggleHTML('relay_only', s.relay_only, 'Relay only'), 'ro') +
+          rowHTML('Automatic port mapping', 'Ask your router (UPnP, NAT-PMP) to open a port for faster direct connections.', toggleHTML('port_mapping', s.port_mapping, 'Automatic port mapping'), 'pm') +
+          rowHTML('Public DHT fallback', 'If no relay can be reached, find members through the BitTorrent DHT. Your IP address becomes visible there.', toggleHTML('dht_fallback', s.dht_fallback, 'Public DHT fallback'), 'dht') +
+          rowHTML('Fixed UDP port', 'For a port you forwarded on your router. Leave empty for automatic.',
+            '<input class="input narrow num" data-field="manual_port" inputmode="numeric" maxlength="5" placeholder="Auto" value="' + (s.manual_port ? s.manual_port : '') + '" aria-label="Fixed UDP port">', 'mp') +
+          '</div><p class="pane-note">Lanfolk listens on UDP port ' + esc(st.listen_port) + (st.port_mapping ? ', mapped by your router (' + esc(st.port_mapping.toUpperCase()) + ')' : '') + '.</p>';
+      case 'relays': {
+        if (!s) return loadingHTML();
+        var html = '<p class="pane-lead">Relays forward encrypted traffic when two members cannot reach each other directly. They cannot read it. The network owner can add relays for their network; you can add your own.</p><div class="card">';
+        (st.relays || []).forEach(function (r, i) {
+          var up = r.mode === 'udp' || r.mode === 'tcp';
+          html += '<div class="row" data-key="r' + i + '"><span class="dot ' + (up ? 'online' : 'attention') + '"></span><div class="row-text"><div class="row-title">' + esc(r.name) + '</div>' +
+            '<div class="row-desc">' + esc({ default: 'Built in', network: 'From the network owner', custom: 'Added by you' }[r.source] || r.source) + '</div></div>' +
+            '<span class="num muted">' + (up ? esc(F.relayModeLabel(r.mode).split(' ')[0] + ' · ' + F.formatMs(r.rtt_ms)) : 'Down') + '</span></div>';
+        });
+        html += '</div><h2 class="pane-sub">Your relays</h2><div class="card">';
+        (s.custom_relays || []).forEach(function (r, i) {
+          html += '<div class="row" data-key="c' + i + '"><div class="row-text"><div class="row-title">' + esc(F.formatRelay(r)) + '</div></div>' +
+            '<button type="button" class="btn sm" data-action="remove-relay" data-index="' + i + '">Remove</button></div>';
+        });
+        html += '<form class="row inline-form" data-form="relay" autocomplete="off">' +
+          '<input class="input" name="host" placeholder="Host name or IP address" aria-label="Relay host" spellcheck="false">' +
+          '<input class="input num" name="udp" value="3478" aria-label="UDP port" inputmode="numeric">' +
+          '<input class="input num" name="tcp" value="443" aria-label="TCP port" inputmode="numeric">' +
+          '<button type="submit" class="btn sm">Add</button></form></div>';
+        return html;
+      }
+      case 'identity':
+        return '<div class="card">' +
+          rowHTML('Friend code', '<span class="mono selectable">' + esc(st.friend_code) + '</span>',
+            '<button type="button" class="btn sm" data-action="copy" data-text="' + esc(st.friend_code) + '" data-label="Friend code copied">' + icon('copy') + 'Copy</button>', 'fc') +
+          rowHTML('Back up your identity', 'A password-protected file. Restore it after reinstalling Windows so friends do not have to add you again.',
+            '<button type="button" class="btn" data-action="backup">Back up…</button>', 'bk') +
+          rowHTML('Restore from a backup', 'Replaces the identity on this computer.', '<button type="button" class="btn" data-action="restore">Restore…</button>', 'rs') +
+          '</div>';
+      case 'troubleshooting':
+        return '<div class="card">' +
+          rowHTML('Diagnostic report', 'Connection details for a bug report. It contains no keys or passwords.',
+            '<button type="button" class="btn" data-action="diagnostics">Save…</button>', 'dg') +
+          rowHTML('Service', esc('Version ' + st.version + ' · UDP port ' + st.listen_port + ' · DHT ' + F.dhtLabel(st.dht).split(' ')[0].toLowerCase()), '', 'svc') +
+          '</div>';
+      case 'about':
+        return '<div class="card"><div class="row" data-key="about"><div class="about">' + mark(40) +
+          '<div><div class="row-title">Lanfolk ' + esc(st.version) + '</div><div class="row-desc">Open source under the Apache License 2.0.</div>' +
+          '<div class="about-links"><button type="button" class="link" data-action="url" data-url="https://github.com/NotrinoResearch/lanfolk">Project page</button>' +
+          '<button type="button" class="link" data-action="url" data-url="https://github.com/NotrinoResearch/lanfolk/blob/main/THIRD_PARTY_NOTICES.md">Third-party notices</button></div>' +
+          '</div></div></div></div>';
     }
-    html += '</div></section>';
-
-    // Advanced: off the main path, collapsed by default.
-    html += '<section class="group" data-key="g-adv"><button type="button" class="disclosure" data-action="advanced" aria-expanded="' + !!S.advanced + '">' +
-      icon('chevron') + '<span class="disclosure-text"><span>Advanced</span><span class="disclosure-hint">Connection, relays, friends, backup, diagnostics</span></span></button>';
-    if (S.advanced) html += advancedHTML(st, s);
-    html += '</section>';
-
-    html += '<section class="group" data-key="g-about"><h2>About</h2><div class="card"><div class="row" data-key="about"><div class="about">' + mark(32) +
-      '<div><div class="row-title">Lanfolk ' + esc(st.version) + '</div><div class="row-desc">Open source under the Apache License 2.0.</div>' +
-      '<div class="about-links"><button type="button" class="link" data-action="url" data-url="https://github.com/NotrinoResearch/lanfolk">Project page</button>' +
-      '<button type="button" class="link" data-action="url" data-url="https://github.com/NotrinoResearch/lanfolk/blob/main/THIRD_PARTY_NOTICES.md">Third-party notices</button></div>' +
-      '</div></div></div></div></section>';
-
-    return html + '</div></div>';
-  }
-
-  function advancedHTML(st, s) {
-    var html = '';
-    if (s) {
-      html += '<h3 class="subgroup">Connection</h3><div class="card">' +
-        rowHTML('Automatic port mapping', 'Ask your router (UPnP, NAT-PMP) to open a port for faster direct connections.', toggleHTML('port_mapping', s.port_mapping, 'Automatic port mapping'), 'pm') +
-        rowHTML('Public DHT fallback', 'If no relay can be reached, find members through the BitTorrent DHT. Your IP address becomes visible there.', toggleHTML('dht_fallback', s.dht_fallback, 'Public DHT fallback'), 'dht') +
-        rowHTML('Fixed UDP port', 'For a port you forwarded on your router. Leave empty for automatic.',
-          '<input class="input narrow num" data-field="manual_port" inputmode="numeric" maxlength="5" placeholder="Auto" value="' + (s.manual_port ? s.manual_port : '') + '" aria-label="Fixed UDP port">', 'mp') +
-        '</div>';
-
-      html += '<h3 class="subgroup">Relays</h3><div class="card"><div class="row row-stack" data-key="relays"><div class="row-text">' +
-        '<div class="row-desc">Relays forward encrypted traffic when a direct connection is not possible. They cannot read it.</div></div>';
-      (st.relays || []).forEach(function (r, i) {
-        var up = r.mode === 'udp' || r.mode === 'tcp';
-        html += '<div class="relay-line" data-key="r' + i + '"><span class="dot ' + (up ? 'online' : 'attention') + '"></span><span>' + esc(r.name) +
-          ' <span class="muted">· ' + esc(r.source) + '</span></span><span class="num">' +
-          (up ? esc(F.relayModeLabel(r.mode).split(' ')[0] + ' · ' + F.formatMs(r.rtt_ms)) : 'Down') + '</span></div>';
-      });
-      (s.custom_relays || []).forEach(function (r, i) {
-        html += '<div class="relay-line" data-key="c' + i + '"><span>Your relay: ' + esc(F.formatRelay(r)) + '</span>' +
-          '<button type="button" class="link push" data-action="remove-relay" data-index="' + i + '">Remove</button></div>';
-      });
-      html += '<form class="inline-form" data-form="relay" autocomplete="off">' +
-        '<input class="input" name="host" placeholder="Add a relay: host" aria-label="Relay host" spellcheck="false">' +
-        '<input class="input num" name="udp" value="3478" aria-label="UDP port" inputmode="numeric">' +
-        '<input class="input num" name="tcp" value="443" aria-label="TCP port" inputmode="numeric">' +
-        '<button type="submit" class="btn sm">Add</button></form></div></div>';
-    }
-
-    html += '<h3 class="subgroup">Friends</h3><div class="card"><div class="row row-stack" data-key="friends"><div class="row-text">' +
-      '<div class="row-desc">Invites make people friends automatically. You can also exchange friend codes by hand.</div></div>' +
-      '<div class="relay-line"><span class="mono selectable grow">' + esc(st.friend_code) + '</span>' +
-      '<button type="button" class="icon-btn" data-action="copy" data-text="' + esc(st.friend_code) + '" data-label="Friend code copied" title="Copy your friend code" aria-label="Copy your friend code">' + icon('copy') + '</button></div>';
-    S.friends.forEach(function (f) {
-      html += '<div class="friend" data-key="f-' + esc(f.public_key) + '"><span class="dot ' + (f.online ? 'online' : 'offline') + '"></span>' +
-        '<div class="friend-text"><div>' + esc(f.nickname || 'Unnamed') + '</div><div class="friend-sub">' +
-        esc(f.state === 'active' ? F.friendPresence(f, Date.now()) : 'Waiting for them to add you') + '</div></div>' +
-        '<button type="button" class="icon-btn" data-action="remove-friend" data-key2="' + esc(f.public_key) + '" title="Remove friend" aria-label="Remove ' + esc(f.nickname) + '">' + icon('trash') + '</button></div>';
-    });
-    html += '<form class="inline-form two" data-form="friend" autocomplete="off">' +
-      '<input class="input" name="code" placeholder="Paste a friend code" aria-label="Friend code" spellcheck="false">' +
-      '<button type="submit" class="btn sm">Add</button></form></div></div>';
-
-    html += '<h3 class="subgroup">Identity</h3><div class="card">' +
-      rowHTML('Back up your identity', 'A password-protected file. Restore it after reinstalling Windows so friends do not have to add you again.',
-        '<button type="button" class="btn" data-action="backup">Back up…</button>', 'bk') +
-      rowHTML('Restore from a backup', 'Replaces the identity on this computer.', '<button type="button" class="btn" data-action="restore">Restore…</button>', 'rs') +
-      '</div>';
-
-    html += '<h3 class="subgroup">Troubleshooting</h3><div class="card">' +
-      rowHTML('Diagnostic report', 'Connection details for a bug report. It contains no keys or passwords.',
-        '<button type="button" class="btn" data-action="diagnostics">Save…</button>', 'dg') +
-      rowHTML('Service', esc('UDP port ' + st.listen_port + (st.port_mapping ? ' · mapped by ' + st.port_mapping.toUpperCase() : '') + ' · DHT ' + F.dhtLabel(st.dht).split(' ')[0].toLowerCase()), '', 'svc') +
-      '</div>';
-    return html;
+    return '';
   }
 
   // --------------------------------------------------------------- actions --
@@ -540,11 +645,10 @@
     S.copied = null;
     if (view === 'invite') loadInvite(S.args.network_id, false);
     if (view === 'join') sniffClipboard();
-    if (view === 'settings') loadSettings();
     render();
-    var v = $('#view');
-    if (v) v.scrollTop = 0;
   }
+
+  function openSettings() { call('OpenSettings').catch(fail); }
 
   function loadSettings() {
     call('GetSettings').then(function (s) { S.settings = s; render(); }, fail);
@@ -557,7 +661,7 @@
     call('CreateInvite', id, !!reset).then(function (r) {
       S.inviteCode = { network_id: id, code: r.code, expires: r.expires };
       render();
-    }, function (e) { fail(e); });
+    }, fail);
   }
 
   function sniffClipboard() {
@@ -607,7 +711,7 @@
         (opts.input ? '<input class="input" name="v" ' + (opts.password ? 'type="password" ' : '') + 'value="' + esc(opts.value || '') + '" aria-label="' + esc(opts.input) + '" placeholder="' + esc(opts.input) + '" maxlength="64">' : '') +
         (opts.input2 ? '<input class="input gap-top-sm" name="v2" type="password" aria-label="' + esc(opts.input2) + '" placeholder="' + esc(opts.input2) + '">' : '') +
         '</div><div class="dialog-foot"><button type="button" class="btn" value="cancel" data-close>Cancel</button>' +
-        '<button type="submit" class="btn ' + (opts.danger ? 'primary' : 'primary') + '" value="ok">' + esc(opts.ok || 'OK') + '</button></div></form>';
+        '<button type="submit" class="btn primary" value="ok">' + esc(opts.ok || 'OK') + '</button></div></form>';
       var done = false;
       function finish(v) { if (!done) { done = true; d.close(); resolve(v); } }
       d.querySelector('[data-close]').onclick = function () { finish(null); };
@@ -623,49 +727,116 @@
     });
   }
 
-  // ---- network menu ----
-  function openMenu(btn, net) {
+  // ---- context menus ----
+  // items: [action, icon, label, danger?] or ['hr']; data goes to menuAction.
+  var menuData = null;
+  function openMenu(anchor, items, data) {
     var m = $('#menu');
+    menuData = data;
+    m.innerHTML = items.map(function (it, i) {
+      if (it[0] === 'hr') return '<hr>';
+      return '<button type="button" role="menuitem" class="' + (it[3] ? 'danger' : '') + '" data-menu="' + esc(it[0]) + '" data-arg="' + esc(it[4] || '') + '">' + icon(it[1]) + '<span>' + esc(it[2]) + '</span></button>';
+    }).join('');
+    m.hidden = false;
+    var w = m.offsetWidth;
+    var h = m.offsetHeight;
+    var x, y;
+    if (anchor.x != null) { x = anchor.x; y = anchor.y; } else {
+      var r = anchor.getBoundingClientRect();
+      x = r.right - w;
+      y = r.bottom + 4;
+      if (y + h > window.innerHeight - 8) y = r.top - h - 4;
+    }
+    m.style.left = Math.max(8, Math.min(window.innerWidth - w - 8, x)) + 'px';
+    m.style.top = Math.max(8, Math.min(window.innerHeight - h - 8, y)) + 'px';
+    var first = m.querySelector('button');
+    if (first) first.focus();
+  }
+  function closeMenu() { var m = $('#menu'); if (m && !m.hidden) { m.hidden = true; m.innerHTML = ''; menuData = null; } }
+
+  function networkMenu(anchor, net) {
     var items = [];
     if (net.is_owner) items.push(['invite', 'invite', 'Invite friends…']);
     items.push(net.active ? ['disconnect', 'leave', 'Disconnect'] : ['connect', 'power', 'Connect']);
     if (net.is_owner) items.push(['rename', 'edit', 'Rename…']);
     items.push(['hr']);
     items.push(['leave', 'trash', net.is_owner ? 'Delete network…' : 'Leave network…', true]);
-    m.innerHTML = items.map(function (it) {
-      if (it[0] === 'hr') return '<hr>';
-      return '<button type="button" role="menuitem" class="' + (it[3] ? 'danger' : '') + '" data-menu="' + it[0] + '" data-id="' + esc(net.id) + '">' + icon(it[1]) + esc(it[2]) + '</button>';
-    }).join('');
-    m.hidden = false;
-    var r = btn.getBoundingClientRect();
-    var w = m.offsetWidth;
-    var h = m.offsetHeight;
-    var top = r.bottom + 4;
-    if (top + h > window.innerHeight - 8) top = r.top - h - 4;
-    m.style.top = Math.max(8, top) + 'px';
-    m.style.left = Math.max(8, Math.min(window.innerWidth - w - 8, r.right - w)) + 'px';
-    m.querySelector('button').focus();
+    openMenu(anchor, items, { net: net.id });
   }
-  function closeMenu() { var m = $('#menu'); if (m && !m.hidden) { m.hidden = true; m.innerHTML = ''; } }
+  function memberMenu(anchor, netId, key) {
+    var n = networkById(netId);
+    var m = memberOf(n, key);
+    if (!n || !m) return;
+    var items = [['copy-ip', 'copy', 'Copy IP address  ' + m.virtual_ip]];
+    var open = S.detail === netId + '/' + key;
+    items.push(['details', 'info', open ? 'Hide details' : 'Show details']);
+    if (n.is_owner && !m.is_self) { items.push(['hr']); items.push(['remove-member', 'trash', 'Remove from ' + n.name + '…', true]); }
+    openMenu(anchor, items, { net: netId, key: key });
+  }
+  function friendMenu(anchor, key) {
+    var f = friendByKey(key);
+    if (!f) return;
+    var items = [];
+    if (f.state === 'active') {
+      ownedNetworksWithout(key).forEach(function (n) { items.push(['add-to', 'plus', 'Add to ' + n.name, false, n.id]); });
+    }
+    items.push(['copy-code', 'copy', 'Copy friend code']);
+    items.push(['hr']);
+    items.push(['remove-friend', 'trash', 'Remove friend…', true]);
+    openMenu(anchor, items, { key: key });
+  }
 
-  function menuAction(what, id) {
+  function menuAction(what, arg) {
+    var d = menuData || {};
     closeMenu();
-    var n = networkById(id);
-    if (!n) return;
+    var n = d.net ? networkById(d.net) : null;
     switch (what) {
-      case 'invite': go('invite', { network_id: id }); break;
-      case 'connect': call('ActivateNetwork', id).catch(fail); break;
-      case 'disconnect': store.set('last-network', id); call('ActivateNetwork', '').catch(fail); break;
+      case 'invite': go('invite', { network_id: d.net }); break;
+      case 'connect': call('ActivateNetwork', d.net).catch(fail); break;
+      case 'disconnect': store.set('last-network', d.net); call('ActivateNetwork', '').catch(fail); break;
       case 'rename':
+        if (!n) return;
         confirmDialog({ title: 'Rename network', text: 'Members see the new name the next time they connect.', input: 'Network name', value: n.name, ok: 'Rename' })
-          .then(function (r) { if (r && r.v.trim()) call('RenameNetwork', id, r.v.trim()).catch(fail); });
+          .then(function (r) { if (r && r.v.trim()) call('RenameNetwork', d.net, r.v.trim()).catch(fail); });
         break;
       case 'leave':
+        if (!n) return;
         confirmDialog(n.is_owner
-          ? { title: 'Delete ' + n.name + '?', text: 'You own this network. Deleting it removes it for good: nobody can join, and members can no longer change it.', ok: 'Delete', danger: true }
-          : { title: 'Leave ' + n.name + '?', text: 'You will need a new invite to join again.', ok: 'Leave', danger: true })
-          .then(function (ok) { if (ok) call('LeaveNetwork', id).catch(fail); });
+          ? { title: 'Delete ' + n.name + '?', text: 'You own this network. Deleting it removes it for good: nobody can join, and members can no longer change it.', ok: 'Delete' }
+          : { title: 'Leave ' + n.name + '?', text: 'You will need a new invite to join again.', ok: 'Leave' })
+          .then(function (ok) { if (ok) call('LeaveNetwork', d.net).catch(fail); });
         break;
+      case 'copy-ip': {
+        var m = memberOf(n, d.key);
+        if (m) copy(m.virtual_ip, 'IP address copied');
+        break;
+      }
+      case 'details':
+        S.detail = S.detail === d.net + '/' + d.key ? null : d.net + '/' + d.key;
+        render();
+        break;
+      case 'remove-member': {
+        var mem = memberOf(n, d.key);
+        confirmDialog({ title: 'Remove ' + (mem ? mem.nickname : 'member') + '?', text: 'They lose access to ' + (n ? n.name : 'the network') + ' right away. If they still have a valid invite code, make a new code so it stops working.', ok: 'Remove' })
+          .then(function (ok) { if (ok) call('RemoveMember', d.net, d.key).then(function () { S.detail = null; }, fail); });
+        break;
+      }
+      case 'add-to': {
+        var target = networkById(arg);
+        call('AddMember', arg, d.key).then(function () { toast('Added to ' + (target ? target.name : 'the network'), 'ok'); }, fail);
+        break;
+      }
+      case 'copy-code': {
+        var fr = friendByKey(d.key);
+        if (fr) copy(fr.friend_code, 'Friend code copied');
+        break;
+      }
+      case 'remove-friend': {
+        var f = friendByKey(d.key);
+        confirmDialog({ title: 'Remove ' + (f ? f.nickname : 'friend') + '?', text: 'Networks you share are not changed.', ok: 'Remove' })
+          .then(function (ok) { if (ok) call('RemoveFriend', d.key).catch(fail); });
+        break;
+      }
     }
   }
 
@@ -673,7 +844,7 @@
 
   document.addEventListener('click', function (ev) {
     var menuBtn = ev.target.closest('[data-menu]');
-    if (menuBtn) { menuAction(menuBtn.getAttribute('data-menu'), menuBtn.getAttribute('data-id')); return; }
+    if (menuBtn) { menuAction(menuBtn.getAttribute('data-menu'), menuBtn.getAttribute('data-arg')); return; }
     if (!ev.target.closest('#menu')) closeMenu();
     var el = ev.target.closest('[data-action]');
     if (!el || el.disabled) return;
@@ -682,35 +853,47 @@
     var key = el.getAttribute('data-key2');
     switch (a) {
       case 'retry': call('Retry'); break;
-      case 'advanced': S.advanced = !S.advanced; render(); break;
       case 'go': go(el.getAttribute('data-view')); break;
       case 'back': go('home'); break;
+      case 'tab': S.tab = id; S.detail = null; render(); break;
+      case 'page': S.page = id; render(); break;
       case 'power': togglePower(); break;
       case 'copy': copy(el.getAttribute('data-text'), el.getAttribute('data-label')); break;
-      case 'toggle-net':
+      case 'toggle-net': {
         var n = networkById(id);
         var cur = S.open[id] != null ? S.open[id] : !!(n && n.active);
         S.open[id] = !cur;
         render();
         break;
+      }
       case 'connect': call('ActivateNetwork', id).catch(fail); break;
-      case 'net-menu': ev.stopPropagation(); openMenu(el, networkById(id)); break;
+      case 'net-menu': ev.stopPropagation(); networkMenu(el, networkById(id)); break;
+      case 'member-menu': ev.stopPropagation(); memberMenu(el, id, key); break;
+      case 'friend-menu': ev.stopPropagation(); friendMenu(el, key); break;
       case 'invite': go('invite', { network_id: id }); break;
-      case 'member':
+      case 'member': {
         var k = id + '/' + key;
         S.detail = S.detail === k ? null : k;
         render();
         break;
-      case 'remove-member':
-        var net = networkById(id);
-        var mem = net && net.members.filter(function (m) { return m.public_key === key; })[0];
-        confirmDialog({ title: 'Remove ' + (mem ? mem.nickname : 'member') + '?', text: 'They lose access to ' + (net ? net.name : 'the network') + ' right away. If they still have a valid invite code, make a new code so it stops working.', ok: 'Remove', danger: true })
-          .then(function (ok) { if (ok) call('RemoveMember', id, key).then(function () { S.detail = null; }, fail); });
+      }
+      case 'friend': {
+        var fk = 'friend/' + key;
+        S.detail = S.detail === fk ? null : fk;
+        render();
         break;
+      }
       case 'cancel-join': call('CancelInvite', id).catch(fail); break;
       case 'paste':
         if (typeof rt.ClipboardGetText === 'function') {
-          rt.ClipboardGetText().then(function (t) { S.args.code = String(t || '').trim(); S.args.pasted = false; S.joinError = ''; render(); var ta = $('#jn-code'); if (ta) ta.value = S.args.code; });
+          rt.ClipboardGetText().then(function (t) {
+            S.args.code = String(t || '').trim();
+            S.args.pasted = false;
+            S.joinError = '';
+            render();
+            var ta = $('#jn-code');
+            if (ta) ta.value = S.args.code;
+          });
         }
         break;
       case 'copy-invite':
@@ -726,16 +909,11 @@
         confirmDialog({ title: 'Make a new invite code?', text: 'The current code stops working. People who already joined stay in the network.', ok: 'Make new code' })
           .then(function (ok) { if (ok) loadInvite(S.args.network_id, true); });
         break;
-      case 'remove-relay':
+      case 'remove-relay': {
         var i = +el.getAttribute('data-index');
-        var list = (S.settings.custom_relays || []).filter(function (_, j) { return j !== i; });
-        setSetting('custom_relays', list);
+        setSetting('custom_relays', (S.settings.custom_relays || []).filter(function (_, j) { return j !== i; }));
         break;
-      case 'remove-friend':
-        var f = S.friends.filter(function (x) { return x.public_key === key; })[0];
-        confirmDialog({ title: 'Remove ' + (f ? f.nickname : 'friend') + '?', text: 'Networks you share are not changed.', ok: 'Remove', danger: true })
-          .then(function (ok) { if (ok) call('RemoveFriend', key).catch(fail); });
-        break;
+      }
       case 'backup': doBackup(); break;
       case 'restore': doRestore(); break;
       case 'diagnostics':
@@ -743,6 +921,17 @@
         break;
       case 'url': if (typeof rt.BrowserOpenURL === 'function') rt.BrowserOpenURL(el.getAttribute('data-url')); break;
     }
+  });
+
+  // Right click on a member or friend opens its menu at the pointer.
+  document.addEventListener('contextmenu', function (ev) {
+    var row = ev.target.closest('[data-ctx]');
+    if (ev.target.closest('input, textarea')) return;
+    ev.preventDefault();
+    if (!row) return;
+    var at = { x: ev.clientX, y: ev.clientY };
+    if (row.getAttribute('data-ctx') === 'member') memberMenu(at, row.getAttribute('data-id'), row.getAttribute('data-key2'));
+    else friendMenu(at, row.getAttribute('data-key2'));
   });
 
   document.addEventListener('focusin', function (ev) {
@@ -789,10 +978,9 @@
       call('CreateNetwork', name).then(function (n) {
         S.busy.create = false;
         store.set('onboarded', '1');
-        var id = n && n.id;
-        if (!id) { go('home'); return; }
-        S.networks = S.networks.concat([n]).filter(function (x, i, arr) { return arr.findIndex(function (y) { return y.id === x.id; }) === i; });
-        go('invite', { network_id: id });
+        if (!n || !n.id) { go('home'); return; }
+        if (!networkById(n.id)) S.networks = S.networks.concat([n]);
+        go('invite', { network_id: n.id });
       }, function (e) { S.busy.create = false; render(); fail(e); });
     } else if (kind === 'join') {
       var code = f.code.value.trim();
@@ -806,6 +994,7 @@
       call('RedeemInvite', code).then(function () {
         S.busy.join = false;
         store.set('onboarded', '1');
+        S.tab = 'networks';
         go('home');
       }, function (e) { S.busy.join = false; S.joinError = errText(e); render(); });
     } else if (kind === 'relay') {
@@ -816,23 +1005,38 @@
       f.host.value = '';
     } else if (kind === 'friend') {
       var c = f.code.value.trim();
-      if (!c) return;
-      call('AddFriend', c, '').then(function () { f.code.value = ''; toast('Friend added. They have to add you too.', 'ok'); }, fail);
+      if (!c) { toast('Paste their friend code first.', 'bad'); return; }
+      call('AddFriend', c, f.nick ? f.nick.value.trim() : '').then(function () {
+        toast('Friend added. They have to add you too.', 'ok');
+        S.tab = 'friends';
+        go('home');
+      }, fail);
     }
   });
 
   document.addEventListener('keydown', function (ev) {
+    var menu = $('#menu');
     if (ev.key === 'Escape') {
-      if (!$('#menu').hidden) { closeMenu(); return; }
+      if (!menu.hidden) { closeMenu(); return; }
       if ($('#dialog').open) return;
-      if (S.view !== 'home') { go('home'); return; }
+      if (S.mode === 'main' && S.view !== 'home') { go('home'); return; }
     }
-    if (!$('#menu').hidden && (ev.key === 'ArrowDown' || ev.key === 'ArrowUp')) {
-      var items = Array.prototype.slice.call($('#menu').querySelectorAll('button'));
+    if (!menu.hidden && (ev.key === 'ArrowDown' || ev.key === 'ArrowUp')) {
+      var items = Array.prototype.slice.call(menu.querySelectorAll('button'));
       var i = items.indexOf(document.activeElement);
       var n = ev.key === 'ArrowDown' ? (i + 1) % items.length : (i - 1 + items.length) % items.length;
       items[n].focus();
       ev.preventDefault();
+    }
+    // Shift+F10 and the context-menu key open the focused row's menu.
+    if ((ev.key === 'ContextMenu' || (ev.key === 'F10' && ev.shiftKey)) && document.activeElement) {
+      var row = document.activeElement.closest('[data-ctx]');
+      if (row) {
+        ev.preventDefault();
+        var more = row.querySelector('.row-more');
+        if (row.getAttribute('data-ctx') === 'member') memberMenu(more, row.getAttribute('data-id'), row.getAttribute('data-key2'));
+        else friendMenu(more, row.getAttribute('data-key2'));
+      }
     }
   });
 
@@ -850,7 +1054,7 @@
   function doRestore() {
     call('OpenTextFile', 'Choose a Lanfolk identity backup').then(function (text) {
       if (!text) return;
-      return confirmDialog({ title: 'Restore this identity?', text: 'Your current identity on this computer is replaced. Friends who know only the current one must add you again.', input: 'Backup password', password: true, ok: 'Restore', danger: true })
+      return confirmDialog({ title: 'Restore this identity?', text: 'Your current identity on this computer is replaced. Friends who know only the current one must add you again.', input: 'Backup password', password: true, ok: 'Restore' })
         .then(function (r) {
           if (!r) return;
           return call('ImportIdentity', text, r.v).then(function () { toast('Identity restored', 'ok'); });
@@ -860,13 +1064,23 @@
 
   // ------------------------------------------------------------ title bar --
 
-  $('#tb-brand').innerHTML = mark(16) + '<span>Lanfolk</span>';
-  $('#tb-settings').innerHTML = icon('settings');
-  $('#tb-min').innerHTML = icon('minimize');
-  $('#tb-close').innerHTML = icon('close');
-  $('#tb-settings').addEventListener('click', function () { go(S.view === 'settings' ? 'home' : 'settings'); });
+  function setupTitlebar() {
+    var settings = S.mode === 'settings';
+    $('#tb-brand').innerHTML = mark(16) + '<span>' + (settings ? 'Lanfolk Settings' : 'Lanfolk') + '</span>';
+    $('#tb-settings').innerHTML = icon('settings');
+    $('#tb-min').innerHTML = icon('minimize');
+    $('#tb-close').innerHTML = icon('close');
+    $('#tb-close').title = settings ? 'Close' : 'Close to the notification area';
+    $('#tb-close').setAttribute('aria-label', $('#tb-close').title);
+    document.title = settings ? 'Lanfolk Settings' : 'Lanfolk';
+    document.body.classList.toggle('is-settings', settings);
+  }
+  $('#tb-settings').addEventListener('click', openSettings);
   $('#tb-min').addEventListener('click', function () { if (rt.WindowMinimise) rt.WindowMinimise(); });
-  $('#tb-close').addEventListener('click', function () { if (rt.WindowHide) rt.WindowHide(); });
+  $('#tb-close').addEventListener('click', function () {
+    if (S.mode === 'settings') { if (rt.Quit) rt.Quit(); return; }
+    if (rt.WindowHide) rt.WindowHide();
+  });
   $('#titlebar').addEventListener('dblclick', function (ev) {
     if (!ev.target.closest('button') && rt.WindowToggleMaximise) rt.WindowToggleMaximise();
   });
@@ -875,17 +1089,18 @@
 
   function on(name, fn) { if (typeof rt.EventsOn === 'function') rt.EventsOn(name, fn); }
   on('service', function (s) {
+    var was = S.service && S.service.connected;
     S.service = s;
     if (!s.connected) { S.status = null; S.peers = []; }
+    if (s.connected && !was && S.mode === 'settings') loadSettings();
     render();
   });
   on('status', function (s) { S.status = s; render(); });
   on('networks', function (n) {
     S.networks = n || [];
-    if (S.detail) {
+    if (S.detail && S.detail.indexOf('friend/') !== 0) {
       var parts = S.detail.split('/');
-      var net = networkById(parts[0]);
-      if (!net || !net.members.some(function (m) { return m.public_key === parts[1]; })) S.detail = null;
+      if (!memberOf(networkById(parts[0]), parts[1])) S.detail = null;
     }
     render();
   });
@@ -893,12 +1108,16 @@
   on('friends', function (f) { S.friends = f || []; render(); });
   on('invites', function (j) { S.invites = j || []; render(); });
   on('navigate', function (v) {
-    if (!v || !S.service || !S.service.connected) return;
+    if (!v || !S.service || !S.service.connected || S.mode !== 'main') return;
     if (v.view === 'invite' && v.network_id) go('invite', { network_id: v.network_id });
-    else if (v.view === 'settings') go('settings');
   });
 
+  call('Mode').then(function (m) { S.mode = m === 'settings' ? 'settings' : 'main'; }, function () { S.mode = 'main'; })
+    .then(function () {
+      setupTitlebar();
+      render();
+      // Events sent before this script ran are lost; ask for the current state.
+      return call('Resync');
+    }).catch(function () {});
   render();
-  // Events sent before this script ran are lost; ask for the current state.
-  call('Resync').catch(function () {});
 })();

@@ -7,3 +7,5 @@ package main
 func devBindings() []any { return nil }
 
 func startAutomation(*wailsHost, *tray) {}
+
+func automationAddress() string { return "" }

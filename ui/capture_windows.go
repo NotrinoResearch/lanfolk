@@ -44,7 +44,7 @@ type bitmapInfoHeader struct {
 }
 
 func mainWindow() (uintptr, error) {
-	cls, _ := windows.UTF16PtrFromString(windowClass)
+	cls, _ := windows.UTF16PtrFromString(windowClassFor(processMode == "settings"))
 	h, _, _ := procFindWindow.Call(uintptr(unsafe.Pointer(cls)), 0)
 	if h == 0 {
 		return 0, errors.New("the Lanfolk window was not found")
