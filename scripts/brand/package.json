@@ -1,0 +1,11 @@
+{
+  "name": "lanfolk-brand-assets",
+  "private": true,
+  "description": "Generates the Lanfolk logo, icons and tray icons from code (node build.mjs).",
+  "type": "module",
+  "license": "Apache-2.0",
+  "dependencies": {
+    "geist": "1.3.1",
+    "opentype.js": "1.3.4"
+  }
+}
