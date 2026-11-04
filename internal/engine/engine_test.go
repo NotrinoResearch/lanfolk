@@ -614,3 +614,18 @@ func hasSource(n, other *node, src pathmgr.Source) bool {
 	}
 	return false
 }
+
+// An offline member keeps an optimistic relay path for its first packets;
+// the API must not report that as a connection.
+func TestOfflineMemberShowsNoPath(t *testing.T) {
+	r := startTestRelay(t)
+	a, b := newNode(t, "ahmet", r), newNode(t, "mehmet", r)
+	befriend(t, a, b)
+	createNetwork(t, a, b)
+	sendUntil(t, a, b, 9000, []byte("hello"))
+	b.stop()
+	waitFor(t, 15*time.Second, "member offline", func() bool { return !a.peer(b).Online })
+	if p := a.peer(b); p.Path != "none" || p.RelayDetail != "" {
+		t.Fatalf("offline member reported as connected: %+v", p)
+	}
+}

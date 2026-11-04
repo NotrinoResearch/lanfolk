@@ -129,8 +129,25 @@ socket bound to 0.0.0.0 sends global broadcast and default-interface
 multicast out of the lowest-metric adapter, which is Lanfolk only in
 compatibility mode.
 
-Not covered yet: B to A (B's `lanprobe test`), two physical machines on
-different ISPs, and a relayed path.
+B to A and over the shared relay (B with Relay only, a second Sandbox
+instance at 10.77.0.4; `lanprobe serve` on A):
+
+| Setup | TCP | UDP | Subnet bcast | Global bcast (bound) | Global bcast (0.0.0.0) | Mcast (IF set) | Mcast (default) | IP in payload | Private range | Blocked ports |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| B to A, direct, compat off | PASS | PASS | PASS | PASS | PASS* (informational) | PASS | FAIL (informational) | PASS | PASS | PASS |
+| B to A, shared relay, compat off | PASS | PASS | PASS | PASS | PASS* (informational) | PASS | FAIL (informational) | PASS | PASS | PASS |
+
+\* Received with the source 172.27.94.240, B's address on the Hyper-V
+switch: in this setup the two machines also share a virtual Ethernet, so a
+0.0.0.0 broadcast reached A outside Lanfolk. Two homes do not share a LAN, so
+this does not apply there.
+
+Relayed path B to A (`lanprobe latency -peer 10.77.0.2 -count 2000`, both
+ends on the same ISP line, relay in a remote data centre): 0 of 2000 lost,
+p50 68.5 ms, p95 109.6 ms, p99 177.3 ms. The p50 equals the round trip to the
+relay (about 70 ms from this line), as expected for host to relay to host.
+
+Not covered yet: two physical machines on different ISPs.
 
 ## Tunnel overhead (Phase 1, `lanprobe latency -compare`)
 

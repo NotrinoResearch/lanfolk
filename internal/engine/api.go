@@ -196,7 +196,9 @@ func (e *Engine) Peers() []ipc.Peer {
 		}
 		ip := ipc.Peer{PublicKey: p.key.Hex(), Nickname: p.displayName(), VirtualIP: vip.String(),
 			Online: p.online(now, e.cfg.OfflineAfter), Path: "none", Quality: pathmgr.QualityUnknown.String()}
-		if v := p.active.Load(); v != nil {
+		// An offline member keeps an optimistic relay path for its first
+		// packets; do not report it as a connection.
+		if v := p.active.Load(); v != nil && ip.Online {
 			ip.Path = v.kind.String()
 			p.mu.Lock()
 			var info pathmgr.PathInfo
