@@ -216,6 +216,11 @@ type fakeIGD struct {
 	serviceType  string
 	extIP        string
 	rejectLeases bool // answer error 725 to AddPortMapping with a non-zero lease
+	// addDelay makes AddPortMapping take effect (and be recorded) only
+	// after this long, like a slow router; addsStarted counts requests that
+	// arrived.
+	addDelay    time.Duration
+	addsStarted int
 }
 
 var soapArg = regexp.MustCompile(`<(New\w+)>([^<]*)</New\w+>`)
@@ -266,6 +271,13 @@ func (f *fakeIGD) control(w http.ResponseWriter, r *http.Request) {
 	args := map[string]string{}
 	for _, m := range soapArg.FindAllStringSubmatch(string(body), -1) {
 		args[m[1]] = m[2]
+	}
+	if action == "AddPortMapping" {
+		f.mu.Lock()
+		f.addsStarted++
+		d := f.addDelay
+		f.mu.Unlock()
+		time.Sleep(d) // the router applies it even if the client gave up
 	}
 	f.mu.Lock()
 	f.calls = append(f.calls, soapCall{action, args, time.Now()})

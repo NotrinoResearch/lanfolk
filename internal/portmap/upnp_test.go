@@ -132,3 +132,28 @@ func TestUPnPUnspecifiedExternalIPIsAFailure(t *testing.T) {
 		t.Errorf("AddPortMapping called %d times although the router has no external address", n)
 	}
 }
+
+// Shutdown during a renewal must not leave a mapping on the router: the
+// delete has to arrive after the renewal took effect.
+func TestShutdownDuringRenewalDeletesLast(t *testing.T) {
+	igd := newFakeIGD(t, "urn:schemas-upnp-org:service:WANIPConnection:1")
+	m := upnpMapper(t, igd, 2*time.Second)
+	events := watch(m)
+	stop := start(t, m)
+	recv(t, events, "mapping")
+	igd.mu.Lock()
+	igd.addDelay = 400 * time.Millisecond
+	before := igd.addsStarted
+	igd.mu.Unlock()
+	waitFor(t, 3*time.Second, "renewal request", func() bool {
+		igd.mu.Lock()
+		defer igd.mu.Unlock()
+		return igd.addsStarted > before
+	})
+	stop() // while the router is still working on the renewal
+	time.Sleep(600 * time.Millisecond)
+	calls := igd.snapshot()
+	if last := calls[len(calls)-1]; last.action != "DeletePortMapping" {
+		t.Fatalf("last call is %s, want DeletePortMapping: the mapping stays on the router", last.action)
+	}
+}

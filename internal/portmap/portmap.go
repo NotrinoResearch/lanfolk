@@ -263,8 +263,22 @@ func (m *Mapper) attempt(ctx context.Context, be backend) (acquired, error) {
 	if be.proto() == ProtoUPnP {
 		limit += m.upnpWait
 	}
-	actx, cancel := context.WithTimeout(ctx, limit)
+	// A request already on its way could reach the gateway after the delete
+	// sent at shutdown and leave the mapping behind (for good, with a
+	// permanent UPnP lease). So shutdown does not abandon an attempt: it
+	// lets it finish for up to releaseTimeout, and Run releases afterwards.
+	actx, cancel := context.WithTimeout(context.WithoutCancel(ctx), limit)
 	defer cancel()
+	stop := context.AfterFunc(ctx, func() {
+		t := time.NewTimer(releaseTimeout)
+		defer t.Stop()
+		select {
+		case <-actx.Done():
+		case <-t.C:
+			cancel()
+		}
+	})
+	defer stop()
 	res, err := be.acquire(actx)
 	if err != nil {
 		return acquired{}, err
