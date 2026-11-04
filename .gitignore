@@ -1,3 +1,7 @@
 # Local secrets (VPS credentials). Never commit.
 .env
 *.env.local
+
+# Agent worktrees and local tool state
+.claude/worktrees/
+.claude/settings.local.json
