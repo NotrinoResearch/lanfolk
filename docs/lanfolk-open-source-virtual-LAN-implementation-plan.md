@@ -533,7 +533,8 @@ Read this file to connect to the VPS and deploy the relay. Use `ip` as `RELAY_PU
 
 ### Phase 9: Hardening
 
-- [ ] Add NAT simulation tests to CI
+- [x] Add NAT simulation tests to CI
+  - `test/natsim` (network namespaces and nftables in Docker): easy/easy goes direct, hard/hard uses the shared relay, blocked UDP uses the TCP fallback, the relay outage keeps the direct path, and loss impairment recovers. The CI job is manual-only (D-002). Delay and jitter (`netem`) need a Linux host.
 - [x] Remove data-path allocations and latency outliers
   - The LAN layer allocates nothing per unicast packet. Relay socket queues were shortened after the load test (D-021).
 - [x] Run security tests and protocol fuzzing

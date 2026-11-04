@@ -34,6 +34,28 @@ jobs:
       - run: go vet ./...
       - run: go test ./...
 
+  natsim:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Kernel modules for tc netem (best effort)
+        run: sudo apt-get install -y --no-install-recommends "linux-modules-extra-$(uname -r)" || true
+      - name: NAT simulation
+        run: test/natsim/run-local.sh
+      - name: Job summary
+        if: always()
+        run: test -f test/natsim/out/summary.md && cat test/natsim/out/summary.md >> "$GITHUB_STEP_SUMMARY" || true
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: natsim-out
+          path: test/natsim/out/
+
   relay-image:
     runs-on: ubuntu-latest
     steps:
