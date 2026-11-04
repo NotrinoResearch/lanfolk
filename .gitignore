@@ -1,0 +1,3 @@
+# Local secrets (VPS credentials). Never commit.
+.env
+*.env.local
