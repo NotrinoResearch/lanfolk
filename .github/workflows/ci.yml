@@ -1,0 +1,48 @@
+# CI is intentionally manual-only for now (docs/DECISIONS.md D-002).
+# To enable it again, add:
+#   push:
+#     branches: [main]
+#   pull_request:
+name: ci
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: gofmt
+        run: test -z "$(gofmt -l $(git ls-files '*.go'))"
+      - run: go vet ./...
+      - run: go test -race ./...
+
+  test-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: go vet ./...
+      - run: go test ./...
+
+  relay-image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build relay image
+        run: docker build -f deploy/relay/Dockerfile -t lanfolk-relay:ci .
+      - name: Scan relay image
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: lanfolk-relay:ci
+          severity: HIGH,CRITICAL
+          exit-code: "1"
