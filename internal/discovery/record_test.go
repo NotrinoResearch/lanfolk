@@ -118,8 +118,22 @@ func TestRecordStale(t *testing.T) {
 	if _, err := OpenRecord(b, val, time.Hour, pub.Add(59*time.Minute)); err != nil {
 		t.Fatalf("fresh record rejected: %v", err)
 	}
-	if _, err := OpenRecord(b, val, 0, pub.Add(1000*time.Hour)); err != nil {
-		t.Fatalf("maxAge 0 must disable the check: %v", err)
+	if _, err := OpenRecord(b, val, 0, pub.Add(20*time.Hour)); err != nil {
+		t.Fatalf("maxAge 0 must disable the age check: %v", err)
+	}
+	// Keys rotate per UTC day, so a record from several days ago cannot be
+	// opened at all, whatever maxAge says.
+	if _, err := OpenRecord(b, val, 0, pub.Add(72*time.Hour)); !errors.Is(err, ErrRecordInvalid) {
+		t.Fatalf("record from another epoch opened: %v", err)
+	}
+}
+
+func TestRecordAcrossDayBoundary(t *testing.T) {
+	a, b := newPairs(t)
+	pub := time.Date(2026, 11, 4, 23, 59, 0, 0, time.UTC)
+	val, _ := SealRecord(a, Record{Published: pub, Candidates: []netip.AddrPort{v4("1.2.3.4:5")}})
+	if _, err := OpenRecord(b, val, time.Hour, pub.Add(2*time.Minute)); err != nil {
+		t.Fatalf("record published just before midnight rejected after it: %v", err)
 	}
 }
 

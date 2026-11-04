@@ -147,8 +147,9 @@ func (d *DHT) Publish(ctx context.Context, pair *identity.Pair, rec Record) erro
 	if err := d.waitReady(ctx); err != nil {
 		return err
 	}
-	salt := pair.DHTSalt(pair.Local)
-	priv := pair.DHTSigningKey(pair.Local)
+	ep := pair.ForDHTEpoch(identity.DHTEpoch(rec.Published))
+	salt := ep.DHTSalt(ep.Local)
+	priv := ep.DHTSigningKey(ep.Local)
 	var pub [32]byte
 	copy(pub[:], priv.Public().(ed25519.PublicKey))
 	target := bep44.MakeMutableTarget(pub, salt)
@@ -178,26 +179,37 @@ func (d *DHT) Lookup(ctx context.Context, pair *identity.Pair, maxAge time.Durat
 	if err := d.waitReady(ctx); err != nil {
 		return Record{}, err
 	}
-	salt := pair.DHTSalt(pair.Remote)
-	pubKey := pair.DHTSigningKey(pair.Remote).Public().(ed25519.PublicKey)
-	var pub [32]byte
-	copy(pub[:], pubKey)
-	target := bep44.MakeMutableTarget(pub, salt)
-	res, _, err := getput.Get(ctx, target, d.srv, nil, salt)
-	if err != nil {
-		if ctx.Err() != nil {
-			return Record{}, ctx.Err()
+	// Records are published under the publisher's current UTC day; look at
+	// today first, then yesterday (publisher clock or day boundary).
+	now := time.Now()
+	today := identity.DHTEpoch(now)
+	var lastErr error = ErrNotFound
+	for _, e := range []uint32{today, today - 1} {
+		ep := pair.ForDHTEpoch(e)
+		salt := ep.DHTSalt(ep.Remote)
+		pubKey := ep.DHTSigningKey(ep.Remote).Public().(ed25519.PublicKey)
+		var pub [32]byte
+		copy(pub[:], pubKey)
+		target := bep44.MakeMutableTarget(pub, salt)
+		res, _, err := getput.Get(ctx, target, d.srv, nil, salt)
+		if err != nil {
+			if ctx.Err() != nil {
+				return Record{}, ctx.Err()
+			}
+			lastErr = fmt.Errorf("%w: %v", ErrNotFound, err)
+			continue
 		}
-		return Record{}, fmt.Errorf("%w: %v", ErrNotFound, err)
+		if !res.Mutable {
+			continue
+		}
+		var value []byte
+		if err := bencode.Unmarshal(res.V, &value); err != nil {
+			lastErr = fmt.Errorf("%w: %v", ErrRecordInvalid, err)
+			continue
+		}
+		return OpenRecord(pair, value, maxAge, now)
 	}
-	if !res.Mutable {
-		return Record{}, ErrNotFound
-	}
-	var value []byte
-	if err := bencode.Unmarshal(res.V, &value); err != nil {
-		return Record{}, fmt.Errorf("%w: %v", ErrRecordInvalid, err)
-	}
-	return OpenRecord(pair, value, maxAge, time.Now())
+	return Record{}, lastErr
 }
 
 // Nodes returns the number of nodes in the routing table.

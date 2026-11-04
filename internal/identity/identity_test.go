@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"strings"
 	"testing"
+	"time"
 
 	"golang.org/x/crypto/curve25519"
 )
@@ -191,5 +192,30 @@ func TestKeyIDStable(t *testing.T) {
 	k2, _ := Generate()
 	if k.Public().KeyID() == k2.Public().KeyID() {
 		t.Fatal("key ID collision")
+	}
+}
+
+func TestDHTEpochRotation(t *testing.T) {
+	a, _ := Generate()
+	b, _ := Generate()
+	pa, _ := DerivePair(a, b.Public())
+	pb, _ := DerivePair(b, a.Public())
+	day := DHTEpoch(time.Date(2026, 11, 4, 12, 0, 0, 0, time.UTC))
+	if day != DHTEpoch(time.Date(2026, 11, 4, 23, 59, 0, 0, time.UTC)) || day == DHTEpoch(time.Date(2026, 11, 5, 0, 0, 1, 0, time.UTC)) {
+		t.Fatal("epoch is not a UTC day")
+	}
+	ea, eb := pa.ForDHTEpoch(day), pb.ForDHTEpoch(day)
+	if !bytes.Equal(ea.DHTSalt(a.Public()), eb.DHTSalt(a.Public())) || ea.DHTKey(a.Public()) != eb.DHTKey(a.Public()) ||
+		!bytes.Equal(ea.DHTSigningKey(a.Public()), eb.DHTSigningKey(a.Public())) {
+		t.Fatal("epoch keys differ between the peers")
+	}
+	next := pa.ForDHTEpoch(day + 1)
+	if bytes.Equal(ea.DHTSalt(a.Public()), next.DHTSalt(a.Public())) ||
+		bytes.Equal(ea.DHTSigningKey(a.Public()), next.DHTSigningKey(a.Public())) ||
+		ea.DHTKey(a.Public()) == next.DHTKey(a.Public()) {
+		t.Fatal("DHT keys do not rotate between days")
+	}
+	if bytes.Equal(ea.DHTSalt(a.Public()), pa.DHTSalt(a.Public())) {
+		t.Fatal("epoch keys equal the base keys")
 	}
 }

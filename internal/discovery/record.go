@@ -74,7 +74,8 @@ func SealRecord(pair *identity.Pair, rec Record) ([]byte, error) {
 		}
 		pt = wire.AppendAddr(pt, c)
 	}
-	key := pair.DHTKey(pair.Local)
+	ep := pair.ForDHTEpoch(identity.DHTEpoch(rec.Published))
+	key := ep.DHTKey(ep.Local)
 	aead, err := chacha20poly1305.NewX(key[:])
 	if err != nil {
 		return nil, err
@@ -83,7 +84,7 @@ func SealRecord(pair *identity.Pair, rec Record) ([]byte, error) {
 	if _, err := rand.Read(out); err != nil {
 		return nil, err
 	}
-	out = aead.Seal(out, out[:chacha20poly1305.NonceSizeX], pt, pair.DHTSalt(pair.Local))
+	out = aead.Seal(out, out[:chacha20poly1305.NonceSizeX], pt, ep.DHTSalt(ep.Local))
 	if n := bencodedLen(len(out)); n > MaxValueSize {
 		return nil, fmt.Errorf("discovery: record of %d bytes exceeds the BEP 44 limit", n)
 	}
@@ -98,14 +99,24 @@ func OpenRecord(pair *identity.Pair, value []byte, maxAge time.Duration, now tim
 	if len(value) < chacha20poly1305.NonceSizeX+chacha20poly1305.Overhead+recordHeaderLen {
 		return rec, ErrRecordInvalid
 	}
-	key := pair.DHTKey(pair.Remote)
-	aead, err := chacha20poly1305.NewX(key[:])
-	if err != nil {
-		return rec, err
-	}
+	// Keys rotate daily (identity.ForDHTEpoch). The epoch is inside the
+	// ciphertext, so try today, yesterday and tomorrow (clock skew).
 	nonce, ct := value[:chacha20poly1305.NonceSizeX], value[chacha20poly1305.NonceSizeX:]
-	pt, err := aead.Open(nil, nonce, ct, pair.DHTSalt(pair.Remote))
-	if err != nil {
+	var pt []byte
+	today := identity.DHTEpoch(now)
+	for _, e := range []uint32{today, today - 1, today + 1} {
+		ep := pair.ForDHTEpoch(e)
+		key := ep.DHTKey(ep.Remote)
+		aead, err := chacha20poly1305.NewX(key[:])
+		if err != nil {
+			return rec, err
+		}
+		if p, err := aead.Open(nil, nonce, ct, ep.DHTSalt(ep.Remote)); err == nil {
+			pt = p
+			break
+		}
+	}
+	if pt == nil {
 		return rec, ErrRecordInvalid
 	}
 	if pt[0] != recordVersion {

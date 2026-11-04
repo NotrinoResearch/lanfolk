@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 
 	"filippo.io/edwards25519"
 	"golang.org/x/crypto/curve25519"
@@ -259,6 +260,21 @@ func (p *Pair) DHTSigningKey(publisher PublicKey) ed25519.PrivateKey {
 
 // DHTKey encrypts DHT record contents published by publisher.
 func (p *Pair) DHTKey(publisher PublicKey) [32]byte { return p.key32("lanfolk/v1/dht-enc", publisher) }
+
+// DHTEpoch returns the UTC day number that rotates DHT keys.
+func DHTEpoch(t time.Time) uint32 { return uint32(t.UTC().Unix() / 86400) }
+
+// ForDHTEpoch returns a pair whose DHT salt, signing key and encryption key
+// belong to one epoch (UTC day). Rotating them daily changes both the BEP 44
+// target and the visible signing key, so DHT nodes cannot link a pair's
+// records across days. Use the returned pair only for DHT derivations.
+func (p *Pair) ForDHTEpoch(epoch uint32) *Pair {
+	var e [4]byte
+	e[0], e[1], e[2], e[3] = byte(epoch>>24), byte(epoch>>16), byte(epoch>>8), byte(epoch)
+	ep := &Pair{Local: p.Local, Remote: p.Remote, SessionID: p.SessionID}
+	copy(ep.secret[:], p.expand("lanfolk/v1/dht-epoch", e[:], 32))
+	return ep
+}
 
 // ConnCodeKey encrypts time-limited connection codes created by sender.
 func (p *Pair) ConnCodeKey(sender PublicKey) [32]byte {
