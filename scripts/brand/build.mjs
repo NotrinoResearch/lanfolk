@@ -145,6 +145,19 @@ for (const [k, v] of Object.entries(tray)) {
 }
 jobs.push({ svg: svg(48, 48, glyph({ a: color.cobalt, you: color.signal })), size: 110, file: 'installer/assets/wizard-small.png' });
 jobs.push({ svg: svg(48, 48, glyph({ a: color.cobalt, you: color.signal })), size: 220, file: 'installer/assets/wizard-small@2x.png' });
+// Welcome and finish page image: cobalt field, the mark large and bleeding
+// off the right edge, the wordmark at the bottom.
+function wizardLarge() {
+  const w = 164;
+  const h = 314;
+  const sc = 4.4;
+  const mark = glyph({ a: 'rgba(255,255,255,0.16)', you: color.mint, scale: sc, dx: 112 - 24 * sc, dy: 128 - 24 * sc });
+  const wm = wordmark('Lanfolk', 22, 18, h - 26, '#FFFFFF');
+  const small = glyph({ a: '#FFFFFF', you: color.mint, scale: 0.6, dx: 16, dy: h - 82 });
+  return svg(w, h, `<rect width="${w}" height="${h}" fill="${color.cobalt}"/>${mark}${small}${wm.d}`);
+}
+jobs.push({ svg: wizardLarge(), size: 0, w: 164, file: 'installer/assets/wizard-large.png' });
+jobs.push({ svg: wizardLarge(), size: 0, w: 328, file: 'installer/assets/wizard-large@2x.png' });
 jobs.push({ svg: logo(false), size: 0, w: 600, file: 'assets/brand/logo.png' });
 jobs.push({ svg: logo(true), size: 0, w: 600, file: 'assets/brand/logo-on-dark.png' });
 
