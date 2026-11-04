@@ -527,7 +527,7 @@ Read this file to connect to the VPS and deploy the relay. Use `ip` as `RELAY_PU
   - *Deviation (D-015):* custom relays are a list, and the DHT fallback and port mapping are switches too.
 - [x] Add diagnostic report export
 - [ ] Build the Windows installer, service registration and uninstaller
-  - The NSIS script compiles and `lanfolk-service install`/`uninstall` exist. It has not run on a clean Windows VM yet (D-022).
+  - The Inno Setup script (`installer/lanfolk.iss`, D-026, replaces the NSIS script of D-022) compiles and `lanfolk-service install`/`uninstall` exist. It has not run on a clean Windows VM yet.
 
 **Gate:** On clean Windows, setup, adding friends, creating a network and uninstalling all work.
 
@@ -582,9 +582,10 @@ Deviations and decisions so far. See [DECISIONS.md](DECISIONS.md) for details.
 | D-019 | Storage | Local tables live in one atomically replaced JSON file |
 | D-020 | Process | Engine, service and CLI tests were written after the code |
 | D-021 | Relay | 1 MB socket buffers so overload drops instead of queueing; optional extra readers |
-| D-022 | Installer | 32-bit NSIS installer for 64-bit binaries |
+| D-022 | Installer | 32-bit NSIS installer for 64-bit binaries (superseded by D-026) |
 | D-023 | Security | Control pipe limited to the installing user and administrators |
 | D-024 | Development | Service flags for running several instances on one machine |
+| D-026 | Installer | Inno Setup 6 instead of NSIS: modern dynamic wizard, native 64-bit, PNG art, PATH task |
 
 ## Test plan
 

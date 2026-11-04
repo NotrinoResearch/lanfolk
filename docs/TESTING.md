@@ -205,15 +205,18 @@ Use fresh virtual machines (snapshot before the test) for Windows 10 and Windows
 Install:
 
 1. Copy `Lanfolk-<version>-setup.exe` into the VM. Verify the SHA-256 against `SHA256SUMS`.
-2. Run it with administrator rights, with and without "Start Lanfolk when I sign in".
-3. Check: files in `C:\Program Files\Lanfolk` (`lanfolk-service.exe`, `lanfolk-cli.exe`, `Lanfolk.exe`, `wintun.dll`, `LICENSE`, `THIRD_PARTY_NOTICES.md`), the Start Menu shortcut, the entry in Settings, Apps with the right version and publisher, the service `Lanfolk` running with start type automatic (`Get-Service Lanfolk`), the firewall group (section 4), and that `C:\ProgramData\Lanfolk` exists after the first start.
-4. Open the app, see the friend code, change the nickname, create a network.
-5. Reboot. The service starts by itself; the app starts if the option was chosen.
-6. Run the installer again over the existing installation (upgrade). Identity and settings are kept.
+2. Run it with administrator rights (Inno Setup wizard). Check the wizard itself: welcome page text, licence page, options page with "Start Lanfolk when I sign in" (on), "Create a desktop shortcut" (off) and "Add the command-line tools to PATH" (on), no "ready" page, the artwork is sharp at 100 %, 150 % and 200 % display scaling, and the wizard follows the Windows light and dark setting (switch the theme and start it again). Run it with and without each option.
+3. Check: files in `C:\Program Files\Lanfolk` (`lanfolk-service.exe`, `lanfolk-cli.exe`, `Lanfolk.exe`, `natprobe.exe`, `lanprobe.exe`, `wintun.dll`, `wintun-LICENSE.txt`, `LICENSE`, `THIRD_PARTY_NOTICES.md`, `unins000.exe`), the Start Menu shortcut `Lanfolk` (directly in the Start menu, no uninstall shortcut), the desktop shortcut only if chosen, the entry in Settings, Apps with the right version, publisher and icon, the service `Lanfolk` running with start type automatic (`Get-Service Lanfolk`), the firewall group (section 4), the value `HKCU\Software\Microsoft\Windows\CurrentVersion\Run\Lanfolk` (`"C:\Program Files\Lanfolk\Lanfolk.exe" --minimized`) only if chosen, the folder in the system PATH only if chosen (open a new terminal and run `lanprobe`; it must be found), and that `C:\ProgramData\Lanfolk` exists after the first start.
+4. Open the app, see the friend code, change the nickname, create a network. On the last wizard page, "Launch Lanfolk" must start the app as the normal (not elevated) user.
+5. Reboot. The service starts by itself; the app starts minimized to the tray if the option was chosen.
+6. Run the installer again over the existing installation (upgrade), also while `Lanfolk.exe` is running. Identity and settings are kept, the old service is replaced, and options that are switched off are removed (Run value, PATH entry).
+7. Failure path: rename `lanfolk-service.exe` in a copy of the build so that `install` fails, or run the installer on a machine where the service cannot be created. The wizard must show the error text with the retry command, the last page must say that Setup could not finish (no "Launch Lanfolk"), and the exit code must be 3.
+8. Silent install and uninstall: `Lanfolk-<version>-setup.exe /VERYSILENT /NORESTART` and `"C:\Program Files\Lanfolk\unins000.exe" /VERYSILENT`. No dialog may appear and the data folder must be kept.
+9. If a build of the NSIS installer is available, install it first, then run the Inno Setup installer over it: there must be only one Lanfolk in Apps and one Start menu entry afterwards.
 
 Uninstall:
 
-1. Uninstall from Settings, Apps. Answer **No** to deleting the data folder. Check: no `Lanfolk` service, adapter, firewall rules or shortcut; no `Lanfolk` entry in Apps; no `HKCU\...\Run` value; `C:\Program Files\Lanfolk` is gone; `C:\ProgramData\Lanfolk` is kept.
+1. Uninstall from Settings, Apps. Answer **No** to deleting the data folder. Check: no `Lanfolk` service, adapter, firewall rules or shortcut; no `Lanfolk` entry in Apps; no `HKCU\...\Run` value; the Lanfolk folder is gone from the system PATH; `C:\Program Files\Lanfolk` is gone; `C:\ProgramData\Lanfolk` is kept.
 2. Install again; the identity (friend code) is unchanged.
 3. Uninstall and answer **Yes**; `C:\ProgramData\Lanfolk` is gone.
 4. Check for residue: `Get-NetAdapter`, `Get-NetFirewallRule -Group Lanfolk`, `Get-Service Lanfolk`, `reg query HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall`, and a search of `C:\Program Files` and `C:\ProgramData` for `Lanfolk`.

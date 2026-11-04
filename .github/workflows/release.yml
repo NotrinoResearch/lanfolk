@@ -52,13 +52,13 @@ jobs:
         shell: pwsh
         run: go test ./...
 
-      - name: Install NSIS
+      - name: Install Inno Setup
         shell: pwsh
         run: |
-          choco install nsis --no-progress -y
-          if ($LASTEXITCODE -ne 0) { throw 'NSIS installation failed.' }
-          $nsis = Join-Path ${env:ProgramFiles(x86)} 'NSIS'
-          "$nsis" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+          choco install innosetup --version=6.7.4 --no-progress -y
+          if ($LASTEXITCODE -ne 0) { throw 'Inno Setup installation failed.' }
+          $inno = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6'
+          "$inno" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
 
       - name: Write build.env
         if: env.RELAY_HOST != ''

@@ -24,7 +24,17 @@ Lanfolk is not a VPN for your internet traffic. Only traffic to the virtual netw
 
    The value must match the line in `SHA256SUMS`.
 3. Run the installer and accept the administrator prompt. Releases are signed once a signing certificate is available; until then, Windows SmartScreen may show "Windows protected your PC". Choose "More info" and then "Run anyway" only if the checksum matched.
-4. The installer copies the program to `C:\Program Files\Lanfolk`, registers the Windows service `Lanfolk` (it starts automatically with Windows), adds Windows Firewall rules (rule group `Lanfolk`) and adds a Start Menu shortcut. You can choose "Start Lanfolk when I sign in".
+4. Follow the wizard: read the licence, then choose the options below and click **Install**. The wizard follows the Windows light or dark setting.
+
+   | Option | Default | What it does |
+   | --- | --- | --- |
+   | Start Lanfolk when I sign in | on | Starts the app minimized to the tray when you sign in (`Lanfolk.exe --minimized`). The service always starts with Windows. |
+   | Create a desktop shortcut | off | Adds a Lanfolk shortcut to your desktop. |
+   | Add the command-line tools to PATH | on | Lets you run `lanfolk-cli`, `lanprobe` and `natprobe` from any terminal. Open a new terminal window after the installation. |
+
+5. The installer copies the program to `C:\Program Files\Lanfolk`, registers the Windows service `Lanfolk` (it starts automatically with Windows), adds Windows Firewall rules (rule group `Lanfolk`) and adds a Start Menu shortcut. On the last page, **Launch Lanfolk** starts the app.
+
+To install without the wizard (for example for a test machine), run `Lanfolk-<version>-setup.exe /VERYSILENT /NORESTART` from an elevated prompt; the options keep their defaults; add for example `/MERGETASKS="!autostart,desktopicon"` to change them (task names `autostart`, `desktopicon`, `addtopath`; a leading `!` switches one off).
 
 Lanfolk stores its data in `C:\ProgramData\Lanfolk`: your identity, friends, networks, settings and logs (in the `logs` folder).
 
@@ -112,7 +122,7 @@ The code contains encrypted addresses of the sender, readable only by that frien
 
 ## Uninstall
 
-Use **Settings, Apps, Installed apps, Lanfolk, Uninstall** (or the uninstaller in the Start Menu). It closes the app, stops and removes the service, removes the firewall rules and the virtual adapter, and deletes the program files and shortcuts.
+Use **Settings, Apps, Installed apps, Lanfolk, Uninstall**. It closes the app, stops and removes the service, removes the firewall rules and the virtual adapter, and deletes the program files, shortcuts and the PATH entry.
 
 It then asks whether to delete `C:\ProgramData\Lanfolk` (your identity and friends). The default answer is **No**, so a later reinstall keeps your identity. Answer **Yes** to remove everything. Export an identity backup first if you may want it again.
 
