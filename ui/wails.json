@@ -1,0 +1,15 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "Lanfolk",
+  "outputfilename": "Lanfolk",
+  "frontend:dir": "frontend",
+  "assetdir": "frontend/dist",
+  "wailsjsdir": "frontend/wailsjs",
+  "frontend:install": "",
+  "frontend:build": "",
+  "info": {
+    "productName": "Lanfolk",
+    "productVersion": "0.1.0",
+    "comments": "Desktop UI for the Lanfolk virtual LAN. A client of the Lanfolk Windows service."
+  }
+}
