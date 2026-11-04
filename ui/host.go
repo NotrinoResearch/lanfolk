@@ -84,3 +84,17 @@ func (h *wailsHost) SetClipboard(text string) error {
 	}
 	return wailsruntime.ClipboardSetText(ctx, text)
 }
+
+// teeHost passes everything to Host and also hands each event to also, so
+// that the tray sees the same state as the window.
+type teeHost struct {
+	Host
+	also func(event string, data any)
+}
+
+func (t teeHost) Emit(event string, data any) {
+	t.Host.Emit(event, data)
+	if t.also != nil {
+		t.also(event, data)
+	}
+}

@@ -16,3 +16,6 @@ build.env
 # NAT simulation (test/natsim): Linux binaries and run output
 /test/natsim/bin/
 /test/natsim/out/
+
+# go-winres output (scripts/build-release.ps1 generates it)
+ui/rsrc_*.syso

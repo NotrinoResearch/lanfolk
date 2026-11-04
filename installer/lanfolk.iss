@@ -89,8 +89,8 @@ WizardImageFileDynamicDark=assets\wizard-large.png,assets\wizard-large@2x.png
 WizardSmallImageFile=assets\wizard-small.png,assets\wizard-small@2x.png
 WizardSmallImageFileDynamicDark=assets\wizard-small.png,assets\wizard-small@2x.png
 ; Ink, so the art panel blends with its edges in light and dark mode.
-WizardImageBackColor=#0F172A
-WizardImageBackColorDynamicDark=#0F172A
+WizardImageBackColor=#2F5BEA
+WizardImageBackColorDynamicDark=#2F5BEA
 
 ; Apps & Features
 UninstallDisplayName={#AppName}

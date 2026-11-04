@@ -169,7 +169,8 @@ try {
     $winresJson = Join-Path $repoRoot 'ui\winres\winres.json'
     if (Test-Path -LiteralPath $winresJson) {
         Write-Host 'Embedding Windows resources (go-winres)'
-        Invoke-Native 'go' @('run', $goWinres, 'make', '--in', 'ui/winres/winres.json', '--out', 'ui/rsrc')
+        Invoke-Native 'go' @('run', $goWinres, 'make', '--in', 'ui/winres/winres.json', '--out', 'ui/rsrc',
+            '--file-version', "$Version.0", '--product-version', "$Version.0")
     } else {
         Write-Host 'ui\winres\winres.json not found; building the UI without embedded resources.'
     }

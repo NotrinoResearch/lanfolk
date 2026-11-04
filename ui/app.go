@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -205,6 +206,10 @@ func (a *App) snapshot(ctx context.Context, c *ipc.Client) {
 	if c.Call(cctx, ipc.MethodListPeers, nil, &peers) == nil {
 		a.host.Emit(ipc.EventPeers, orEmpty(peers))
 	}
+	var joins []ipc.PendingJoin
+	if c.Call(cctx, ipc.MethodListInvites, nil, &joins) == nil {
+		a.host.Emit(ipc.EventInvites, orEmpty(joins))
+	}
 }
 
 // pump forwards pushed events until the connection ends.
@@ -243,6 +248,11 @@ func (a *App) forward(m *ipc.Message) {
 		var v []ipc.Network
 		if json.Unmarshal(m.Data, &v) == nil {
 			a.host.Emit(m.Event, normalizeNetworks(v))
+		}
+	case ipc.EventInvites:
+		var v []ipc.PendingJoin
+		if json.Unmarshal(m.Data, &v) == nil {
+			a.host.Emit(m.Event, orEmpty(v))
 		}
 	}
 }
@@ -434,6 +444,41 @@ func (a *App) LeaveNetwork(networkID string) error {
 	return a.call(ipc.MethodLeaveNetwork, ipc.NetworkParams{NetworkID: networkID}, nil)
 }
 
+// ---- invites ----
+
+// CreateInvite returns the invite code of an owned network. reset replaces
+// the current code with a new one, so the old code stops working.
+func (a *App) CreateInvite(networkID string, reset bool) (ipc.InviteResult, error) {
+	var res ipc.InviteResult
+	if err := a.call(ipc.MethodCreateInvite, ipc.InviteParams{NetworkID: networkID, Reset: reset}, &res); err != nil {
+		return ipc.InviteResult{}, err
+	}
+	return res, nil
+}
+
+// RedeemInvite joins a network with an invite code a friend sent.
+func (a *App) RedeemInvite(code string) (ipc.RedeemResult, error) {
+	var res ipc.RedeemResult
+	if err := a.call(ipc.MethodRedeemInvite, ipc.CodeParams{Code: strings.TrimSpace(code)}, &res); err != nil {
+		return ipc.RedeemResult{}, err
+	}
+	return res, nil
+}
+
+// ListInvites returns the invites this user redeemed and their progress.
+func (a *App) ListInvites() ([]ipc.PendingJoin, error) {
+	var res []ipc.PendingJoin
+	if err := a.call(ipc.MethodListInvites, nil, &res); err != nil {
+		return nil, err
+	}
+	return orEmpty(res), nil
+}
+
+// CancelInvite stops waiting for a join.
+func (a *App) CancelInvite(networkID string) error {
+	return a.call(ipc.MethodCancelInvite, ipc.NetworkParams{NetworkID: networkID}, nil)
+}
+
 // ---- settings and diagnostics ----
 
 // GetSettings returns the user-adjustable settings.
@@ -517,4 +562,27 @@ func (a *App) OpenTextFile(title string) (string, error) {
 
 func localError(what string, err error) error {
 	return &UserError{Code: CodeLocal, Message: fmt.Sprintf("%s: %v", what, err)}
+}
+
+// ---- desktop integration ----
+
+// StartWithWindows reports whether Lanfolk opens (in the tray) at sign-in.
+func (a *App) StartWithWindows() (bool, error) {
+	on, err := startWithWindows()
+	if err != nil {
+		return false, localError("Could not read the startup setting", err)
+	}
+	return on, nil
+}
+
+// SetStartWithWindows turns opening at sign-in on or off.
+func (a *App) SetStartWithWindows(on bool) error {
+	exe, err := os.Executable()
+	if err != nil {
+		return localError("Could not find Lanfolk.exe", err)
+	}
+	if err := setStartWithWindows(on, exe); err != nil {
+		return localError("Could not change the startup setting", err)
+	}
+	return nil
 }
