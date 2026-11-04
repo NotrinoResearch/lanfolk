@@ -9,7 +9,8 @@ Use GitHub's private vulnerability reporting: open the repository's
 **Security** tab, choose **Advisories**, then **Report a vulnerability**
 (<https://github.com/NotrinoResearch/lanfolk/security/advisories/new>). If the
 repository moves, the Security tab of the current repository is the place to
-report.
+report. If you cannot use GitHub, write to <info@notrino.com> with "Lanfolk
+security" in the subject.
 
 Please include:
 

@@ -51,8 +51,8 @@ Last updated: 4 November 2026.
       executables. Until then Windows SmartScreen warns about the download.
 - [ ] Have a lawyer review the license choice, [LICENSING.md](../LICENSING.md)
       and the [CLA](../CLA.md).
-- [ ] Add a contact address for commercial license requests to
-      LICENSING.md.
+- [x] Add a contact address for commercial license requests to
+      LICENSING.md (info@notrino.com).
 - [ ] Decide whether to register "Lanfolk" as a trademark.
 - [ ] Turn CI back on (it is manual-only now, D-002).
 - [ ] Add a second relay closer to players in Turkey. From the measured line

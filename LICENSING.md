@@ -30,8 +30,8 @@ start.
 
 ## Getting a commercial license
 
-Contact NotrinoResearch through <https://github.com/NotrinoResearch>. Tell us
-who you are and how you want to use Lanfolk.
+Write to <info@notrino.com>. Tell us who you are and how you want to use
+Lanfolk.
 
 ## Earlier versions
 

@@ -67,8 +67,8 @@ when a game doesn't find the other players.
 Yes, for personal and other noncommercial use. Lanfolk is made by
 NotrinoResearch and licensed under the
 [PolyForm Noncommercial License 1.0.0](LICENSE). Companies, LAN centers and
-anyone who wants to sell or bundle it need a commercial license. See
-[LICENSING.md](LICENSING.md).
+anyone who wants to sell or bundle it need a commercial license: see
+[LICENSING.md](LICENSING.md) or write to <info@notrino.com>.
 
 ## Status
 
