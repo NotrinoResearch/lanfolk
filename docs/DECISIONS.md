@@ -569,6 +569,9 @@ Date: 2026-11-04.
   member back after 2 minutes or more, a new member in a network you own, a
   join you started finishing, a new release once. On by default (PRODUCT.md
   principle 4), off in Settings > General.
+  The structure is declared in Lanfolk, matching NOTIFYICONDATAW byte for
+  byte (a test checks the offsets): a wrong layout makes Windows accept the
+  call and show nothing, which is how 0.3.0 shipped.
 - Hello carries the sender's release as an optional trailing field (since
   0.3.0; 0.2 ignores it), so the app can say "Older Lanfolk" on a member and
   suggest updating when a member is newer.

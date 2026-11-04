@@ -43,7 +43,12 @@ Last updated: 4 November 2026.
       doing.
 - [ ] Check that Windows shows the notifications (a member coming online, an
       update) on a machine with Focus Assist off and that a full-screen game
-      holds them back.
+      holds them back. On 4 November 0.3.0 showed none: the NOTIFYICONDATAW
+      copy from fyne.io/systray has uTimeout and uVersion as two fields, not
+      a union, so every later field was 4 bytes off and Shell_NotifyIcon
+      succeeded without showing anything. Fixed after 0.3.0 and confirmed on
+      screen with the test build; a layout test guards it. Still to check
+      with the real triggers in an installed build.
 - [ ] Upgrade 0.2.1 to 0.3.0 over the top on a machine with a network and
       friends; everything must still be there.
 

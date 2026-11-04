@@ -28,7 +28,9 @@ const (
 	niifRespectQuietTime = 0x80
 )
 
-// notifyIconData is NOTIFYICONDATAW (same layout as fyne's).
+// notifyIconData is NOTIFYICONDATAW. uTimeout and uVersion are a union in
+// C: one field here. (fyne's copy has two, which shifts every later field
+// by 4 bytes; Windows then accepts the call and shows nothing.)
 type notifyIconData struct {
 	Size                       uint32
 	Wnd                        windows.Handle
@@ -37,7 +39,7 @@ type notifyIconData struct {
 	Tip                        [128]uint16
 	State, StateMask           uint32
 	Info                       [256]uint16
-	Timeout, Version           uint32
+	TimeoutOrVersion           uint32
 	InfoTitle                  [64]uint16
 	InfoFlags                  uint32
 	GuidItem                   windows.GUID
