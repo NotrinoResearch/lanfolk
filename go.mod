@@ -92,6 +92,7 @@ require (
 	golang.org/x/text v0.43.0 // indirect
 	golang.org/x/time v0.14.0 // indirect
 	golang.org/x/tools v0.51.0 // indirect
+	golang.zx2c4.com/wintun v0.0.0-20230126152724-0fa3db229ce2 // indirect
 	golang.zx2c4.com/wireguard/windows v1.1.1 // indirect
 	gopkg.in/Knetic/govaluate.v3 v3.0.0 // indirect
 	lukechampine.com/blake3 v1.1.6 // indirect
