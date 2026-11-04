@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/netip"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -669,4 +670,35 @@ func TestOfflineMemberShowsNoPath(t *testing.T) {
 	if p := a.peer(b); p.Path != "none" || p.RelayDetail != "" {
 		t.Fatalf("offline member reported as connected: %+v", p)
 	}
+}
+
+// Members cannot reach a port that only a Windows service owns, unless the
+// user allows it in the troubleshooting settings.
+func TestServicePortsUnreachableUntilAllowed(t *testing.T) {
+	r := startTestRelay(t)
+	a := newNode(t, "ahmet", r)
+	b := newNodeIn(t, "mehmet", r, t.TempDir(), func(c *Config) {
+		c.ServicePort = func(proto uint8, port uint16) bool { return proto == 17 && port == 7000 }
+	})
+	befriend(t, a, b)
+	createNetwork(t, a, b)
+	sendUntil(t, a, b, 9000, []byte("game traffic"))
+	a.send(netip.AddrPortFrom(b.vip(), 7000), []byte("to a service"))
+	b.expectNone(t, time.Second, []byte("to a service"))
+	if s := b.lanStats(); s.DroppedService == 0 {
+		t.Fatalf("no service drop counted: %+v", s)
+	}
+	if !strings.Contains(b.e.Diagnostics(), `"DroppedService": `) {
+		t.Error("diagnostics lack the tunnel counters")
+	}
+
+	st := b.e.Settings()
+	st.AllowServices = true
+	if _, err := b.e.SetSettings(st); err != nil {
+		t.Fatal(err)
+	}
+	if !b.e.Settings().AllowServices {
+		t.Fatal("setting not stored")
+	}
+	sendUntil(t, a, b, 7000, []byte("allowed now"))
 }

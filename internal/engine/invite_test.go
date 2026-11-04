@@ -467,3 +467,115 @@ func TestInviteSimultaneousJoiners(t *testing.T) {
 		t.Fatalf("%d members, want 4", n)
 	}
 }
+
+// fastPrune makes invite-only friendships end quickly in tests.
+func fastPrune(c *Config) {
+	c.InviteFriendGrace = time.Millisecond
+	c.RemovalPruneDelay = 300 * time.Millisecond
+}
+
+// joinWithInvite lets joiner join owner's network with a fresh code.
+func joinWithInvite(t *testing.T, owner, joiner *node, nid string) string {
+	t.Helper()
+	code, _ := mustInvite(t, owner, nid, false)
+	if _, err := joiner.e.RedeemInvite(code); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 20*time.Second, joiner.name+" to join", func() bool { return isActiveMember(joiner, nid) })
+	return code
+}
+
+// Removing a member stops the invite code it used and ends the friendship
+// that only the invite created, on both sides.
+func TestRemoveMemberResetsInviteAndEndsInviteFriendship(t *testing.T) {
+	r := startTestRelay(t)
+	a := newNodeIn(t, "ahmet", r, t.TempDir(), fastPrune)
+	b := newNodeIn(t, "mehmet", r, t.TempDir(), fastPrune)
+	c := newNodeIn(t, "can", r, t.TempDir(), fastPrune)
+	l, err := a.e.CreateNetwork("Friday games")
+	if err != nil {
+		t.Fatal(err)
+	}
+	nid := l.ID.String()
+	code := joinWithInvite(t, a, b, nid)
+
+	if err := a.e.RemoveMember(l.ID, b.e.PublicKey()); err != nil {
+		t.Fatal(err)
+	}
+	if fresh, _ := mustInvite(t, a, nid, false); fresh == code {
+		t.Fatal("the invite code still works after removing a member")
+	}
+	waitFor(t, 15*time.Second, "the invite-only friendship to end on both sides", func() bool {
+		return friendState(a, b) == "" && friendState(b, a) == "" && len(b.e.Networks()) == 0
+	})
+	// The old code no longer opens the network.
+	if _, err := c.e.RedeemInvite(code); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(3 * time.Second)
+	if joinState(c, nid) != ipc.JoinWaiting || len(c.e.Networks()) != 0 {
+		t.Fatalf("old code: state %q, networks %d", joinState(c, nid), len(c.e.Networks()))
+	}
+	// The waiting joiner keeps the owner as a friend while it waits.
+	if friendState(c, a) == "" {
+		t.Fatal("the owner friend of a waiting join was pruned")
+	}
+}
+
+// Friends the user added by hand, or kept by adding them again, stay.
+func TestRemoveMemberKeepsChosenFriends(t *testing.T) {
+	r := startTestRelay(t)
+	a := newNodeIn(t, "ahmet", r, t.TempDir(), fastPrune)
+	b := newNodeIn(t, "mehmet", r, t.TempDir(), fastPrune)
+	c := newNodeIn(t, "can", r, t.TempDir(), fastPrune)
+	befriend(t, a, b)
+	nid := createNetwork(t, a, b)
+	id := mustNetID(t, nid)
+	joinWithInvite(t, a, c, nid)
+	// can decides to keep ahmet as a friend: adding an invite friend again
+	// makes the friendship permanent instead of failing.
+	if _, err := c.e.AddFriend(a.code(), "ahmet"); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.e.RemoveMember(id, b.e.PublicKey()); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.e.RemoveMember(id, c.e.PublicKey()); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 15*time.Second, "both to drop the network", func() bool {
+		return len(b.e.Networks()) == 0 && len(c.e.Networks()) == 0
+	})
+	time.Sleep(time.Second) // past the removal delay
+	if friendState(a, b) != "active" || friendState(b, a) != "active" {
+		t.Fatalf("hand-added friendship changed: %q %q", friendState(a, b), friendState(b, a))
+	}
+	if friendState(c, a) == "" {
+		t.Fatal("a friend kept on purpose was pruned")
+	}
+	if friendState(a, c) != "" {
+		t.Fatal("the owner kept an invite-only friend")
+	}
+}
+
+// Cancelling a join drops the owner friend that the invite added.
+func TestCancelJoinDropsInviteOwnerFriend(t *testing.T) {
+	r := startTestRelay(t)
+	a := newNodeIn(t, "ahmet", r, t.TempDir(), fastPrune)
+	b := newNodeIn(t, "mehmet", r, t.TempDir(), fastPrune)
+	l, _ := a.e.CreateNetwork("Later")
+	code, _ := mustInvite(t, a, l.ID.String(), false)
+	a.stop() // the owner is offline, so the join waits
+	if _, err := b.e.RedeemInvite(code); err != nil {
+		t.Fatal(err)
+	}
+	if friendState(b, a) == "" {
+		t.Fatal("redeeming did not add the owner")
+	}
+	if err := b.e.CancelJoin(l.ID); err != nil {
+		t.Fatal(err)
+	}
+	if friendState(b, a) != "" {
+		t.Fatalf("owner still a friend after cancel: %q", friendState(b, a))
+	}
+}

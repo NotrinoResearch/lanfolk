@@ -95,6 +95,36 @@ func config() (relay.Config, error) {
 		return cfg, err
 	}
 	cfg.IdleTimeout = time.Duration(idle) * time.Second
+	// Caps where 0 means "off".
+	if cfg.MaxIPKbps, err = envInt("RELAY_MAX_IP_KBPS", cfg.MaxIPKbps); err != nil {
+		return cfg, err
+	}
+	if cfg.MaxTotalMbps, err = envInt("RELAY_MAX_TOTAL_MBPS", cfg.MaxTotalMbps); err != nil {
+		return cfg, err
+	}
+	if cfg.MaxTCPConns, err = envInt("RELAY_MAX_TCP_CONNS", cfg.MaxTCPConns); err != nil {
+		return cfg, err
+	}
+	grace, err := envInt("RELAY_TCP_GRACE_SEC", int(cfg.TCPGrace/time.Second))
+	if err != nil {
+		return cfg, err
+	}
+	cfg.TCPGrace = time.Duration(grace) * time.Second
+	if cfg.MaxEchoesPerIP, err = envInt("RELAY_MAX_ECHOES_PER_IP", cfg.MaxEchoesPerIP); err != nil {
+		return cfg, err
+	}
+	if cfg.Challenge, err = relay.ParseChallengeMode(env("RELAY_CHALLENGE", "auto")); err != nil {
+		return cfg, fmt.Errorf("RELAY_CHALLENGE: %w", err)
+	}
+	if cfg.ChallengeSessionsPct, err = envInt("RELAY_CHALLENGE_SESSIONS_PCT", cfg.ChallengeSessionsPct); err != nil {
+		return cfg, err
+	}
+	if cfg.ChallengeSessionsPct > 100 {
+		return cfg, fmt.Errorf("RELAY_CHALLENGE_SESSIONS_PCT must be 0-100")
+	}
+	if cfg.ChallengeNewPerSec, err = envInt("RELAY_CHALLENGE_NEW_PER_SEC", cfg.ChallengeNewPerSec); err != nil {
+		return cfg, err
+	}
 	cfg.MetricsAddr = env("RELAY_METRICS_ADDR", cfg.MetricsAddr)
 	if cfg.MetricsAddr == "off" {
 		cfg.MetricsAddr = ""
@@ -117,7 +147,9 @@ func serve() error {
 	if err != nil {
 		return err
 	}
-	log.Info("lanfolk-relay", "version", version.Version, "public_host_set", cfg.PublicHost != "")
+	log.Info("lanfolk-relay", "version", version.Version, "public_host_set", cfg.PublicHost != "",
+		"max_ip_kbps", cfg.MaxIPKbps, "max_total_mbps", cfg.MaxTotalMbps, "max_tcp_conns", cfg.MaxTCPConns,
+		"challenge", env("RELAY_CHALLENGE", "auto"))
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	return srv.Serve(ctx)

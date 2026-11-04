@@ -114,7 +114,7 @@ func (n *noticeState) networks(nets []ipc.Network, now time.Time) []notice {
 				if !m.IsSelf && !old[m.PublicKey] && !n.recentlyNotified(m.PublicKey, now) {
 					n.notifiedAt[m.PublicKey] = now // no "is online" right after
 					out = append(out, notice{Title: m.Nickname + " joined " + net.Name,
-						Body: "They show up in your network when they are online."})
+						Body: "Not someone you invited? Remove them from the member menu; that also stops the invite code."})
 				}
 			}
 		}

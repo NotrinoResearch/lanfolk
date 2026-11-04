@@ -17,13 +17,17 @@ func TestIsBlocked(t *testing.T) {
 		want  bool
 	}{
 		{6, 135, true}, {6, 139, true}, {6, 445, true}, {6, 3389, true},
-		{6, 5985, true}, {6, 5986, true},
+		{6, 5985, true}, {6, 5986, true}, {6, 593, true}, {6, 2869, true},
+		{6, 5355, true}, {6, 5357, true}, {6, 5358, true}, {6, 10243, true},
+		{6, 5356, false}, {6, 5359, false}, {6, 5353, false},
 		{6, 134, false}, {6, 136, false}, {6, 138, false}, {6, 140, false},
 		{6, 444, false}, {6, 446, false}, {6, 3388, false}, {6, 3390, false},
 		{6, 5984, false}, {6, 5987, false}, {6, 0, false}, {6, 80, false},
 		{6, 25565, false}, {6, 65535, false},
 		{17, 137, true}, {17, 138, true},
-		{17, 136, false}, {17, 139, false}, {17, 445, false}, {17, 3389, false},
+		{17, 1900, true}, {17, 3389, true}, {17, 3702, true}, {17, 5355, true},
+		{17, 136, false}, {17, 139, false}, {17, 445, false}, {17, 3388, false},
+		{17, 5353, false}, {17, 1899, false}, {17, 1901, false},
 		{17, 27015, false},
 		{1, 135, false}, {0, 445, false}, {47, 137, false},
 	}
@@ -119,11 +123,11 @@ func TestEnsureFirewallCommand(t *testing.T) {
 		// Rule 2.
 		"-Direction Inbound -Action Allow -Protocol Any -LocalAddress @('10.77.0.0/24','255.255.255.255','224.0.0.0/4') -RemoteAddress '10.77.0.0/24'",
 		// Rule 3.
-		"-Direction Inbound -Action Block -Protocol TCP -LocalPort @('135','139','445','3389','5985-5986') -RemoteAddress '10.77.0.0/24'",
-		"-Direction Inbound -Action Block -Protocol UDP -LocalPort @('137-138') -RemoteAddress '10.77.0.0/24'",
+		"-Direction Inbound -Action Block -Protocol TCP -LocalPort @('135','139','445','593','2869','3389','5355','5357-5358','5985-5986','10243') -RemoteAddress '10.77.0.0/24'",
+		"-Direction Inbound -Action Block -Protocol UDP -LocalPort @('137-138','1900','3389','3702','5355') -RemoteAddress '10.77.0.0/24'",
 		// Rule 4.
-		"-Direction Outbound -Action Block -Protocol TCP -RemotePort @('135','139','445','3389','5985-5986') -RemoteAddress '10.77.0.0/24'",
-		"-Direction Outbound -Action Block -Protocol UDP -RemotePort @('137-138') -RemoteAddress '10.77.0.0/24'",
+		"-Direction Outbound -Action Block -Protocol TCP -RemotePort @('135','139','445','593','2869','3389','5355','5357-5358','5985-5986','10243') -RemoteAddress '10.77.0.0/24'",
+		"-Direction Outbound -Action Block -Protocol UDP -RemotePort @('137-138','1900','3389','3702','5355') -RemoteAddress '10.77.0.0/24'",
 	} {
 		if !strings.Contains(script, want) {
 			t.Errorf("script lacks %q\n%s", want, script)

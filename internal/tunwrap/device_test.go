@@ -125,6 +125,60 @@ func TestBlockedPortsInbound(t *testing.T) {
 	}
 }
 
+// tcpFlags returns a copy of a rawTCP packet with other TCP flags.
+func tcpFlags(pkt []byte, flags byte) []byte {
+	p := append([]byte(nil), pkt...)
+	p[20+13] = flags
+	return p
+}
+
+// Ports owned only by system services are unreachable for members: UDP and
+// new TCP connections. Replies to our own connections and outbound traffic
+// are not affected.
+func TestServicePortsInbound(t *testing.T) {
+	asked := 0
+	service := func(proto uint8, port uint16) bool {
+		asked++
+		return proto == 6 && port == 5432 || proto == 17 && port == 5353
+	}
+	e := newEnv(t, func(c *Config) { c.ServicePort = service }, addrB)
+	dropped := [][]byte{
+		rawTCP(addrB, addrSelf, 40000, 5432), // SYN
+		udpPkt(addrB, addrSelf, 5000, 5353, "unicast"),
+		lanFrame(addrB, addrSelf, udpPkt(addrB, netip.MustParseAddr("224.0.0.251"), 5353, 5353, "mdns")),
+	}
+	passed := [][]byte{
+		tcpFlags(rawTCP(addrB, addrSelf, 5432, 40000), 0x12), // SYN-ACK: reply to our connection
+		tcpFlags(rawTCP(addrB, addrSelf, 40000, 5432), 0x10), // ACK only: no new connection
+		rawTCP(addrB, addrSelf, 40000, 25565),                // a game's TCP port
+		udpPkt(addrB, addrSelf, 5000, 27015, "game"),
+	}
+	e.writeIn(t, append(dropped, passed...)...)
+	got := e.drainOS()
+	if len(got) != len(passed) {
+		t.Fatalf("delivered %d packets, want %d", len(got), len(passed))
+	}
+	for i := range passed {
+		if !bytes.Equal(got[i], passed[i]) {
+			t.Errorf("packet %d changed or reordered", i)
+		}
+	}
+	if s := e.d.Stats(); s.DroppedService != uint64(len(dropped)) {
+		t.Fatalf("DroppedService = %d, want %d", s.DroppedService, len(dropped))
+	}
+
+	// Outbound traffic to a member's port is never asked about.
+	before := asked
+	out := rawTCP(addrSelf, addrB, 40000, 5432)
+	e.mem.InjectFromOS(out)
+	if p := e.readOne(t); !bytes.Equal(p, out) {
+		t.Fatal("outbound packet changed")
+	}
+	if asked != before {
+		t.Fatal("outbound packet was checked against local services")
+	}
+}
+
 func TestNilBlockedAllowsEverything(t *testing.T) {
 	e := newEnv(t, func(c *Config) { c.Blocked = nil }, addrB)
 	p := rawTCP(addrSelf, addrB, 1, 445)
@@ -301,6 +355,43 @@ func TestBroadcastDropRules(t *testing.T) {
 	s := e.d.Stats()
 	if s.DroppedBlocked != 3 || s.DroppedOther != 4 || s.LanFramesOut != 0 {
 		t.Fatalf("stats = %+v", s)
+	}
+}
+
+// Name resolution and device discovery multicast (LLMNR, SSDP, WS-Discovery)
+// must not reach other members in either direction; mDNS stays.
+func TestDiscoveryMulticastNotForwarded(t *testing.T) {
+	llmnr := netip.MustParseAddr("224.0.0.252")
+	ssdp := netip.MustParseAddr("239.255.255.250")
+	mdns := netip.MustParseAddr("224.0.0.251")
+
+	e := newEnv(t, nil, addrB)
+	for _, p := range [][]byte{
+		udpPkt(addrSelf, llmnr, 50000, 5355, "llmnr query"),
+		udpPkt(addrSelf, ssdp, 50000, 1900, "M-SEARCH"),
+		udpPkt(addrSelf, ssdp, 50000, 3702, "ws-discovery probe"),
+	} {
+		e.mem.InjectFromOS(p)
+	}
+	keep := udpPkt(addrSelf, mdns, 5353, 5353, "mdns query")
+	e.mem.InjectFromOS(keep)
+	got := e.readN(t, 16)
+	if len(got) != 1 {
+		t.Fatalf("got %d frames, want only the mDNS one", len(got))
+	}
+	checkFrame(t, got[0], addrSelf, addrB, keep)
+	if s := e.d.Stats(); s.DroppedBlocked != 3 {
+		t.Fatalf("DroppedBlocked = %d, want 3", s.DroppedBlocked)
+	}
+
+	// Inbound: a member's LLMNR answer bait never reaches the adapter.
+	in := newEnv(t, nil, addrB)
+	in.writeIn(t, lanFrame(addrB, addrSelf, udpPkt(addrB, llmnr, 50000, 5355, "llmnr")))
+	if pkts := in.drainOS(); len(pkts) != 0 {
+		t.Fatalf("inbound LLMNR reached the adapter: %d packets", len(pkts))
+	}
+	if s := in.d.Stats(); s.DroppedBlocked != 1 {
+		t.Fatalf("inbound DroppedBlocked = %d, want 1", s.DroppedBlocked)
 	}
 }
 

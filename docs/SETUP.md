@@ -185,7 +185,7 @@ It then asks whether to delete `C:\ProgramData\Lanfolk` (your identity and frien
 ## Troubleshooting
 
 **The app says the service is not running.**
-Open Services (`services.msc`), find **Lanfolk** and start it. The log files are in `C:\ProgramData\Lanfolk\logs`. If the service does not start, reinstall and attach the log to an issue.
+Open Services (`services.msc`), find **Lanfolk** and start it. The log files are in `C:\ProgramData\Lanfolk\logs`; the folder is private to the service, so open it as an administrator. If the service does not start, reinstall and attach the log to an issue.
 
 **A game does not find the other players.**
 Many games find servers by broadcasting on the local network.
@@ -196,7 +196,7 @@ Many games find servers by broadcasting on the local network.
 5. Some games only work with online accounts, or announce their own address. Lanfolk does not touch normal internet traffic, so it cannot help with anti-cheat or account checks.
 
 **Windows Firewall or security software blocks the game.**
-Lanfolk adds firewall rules for the virtual adapter and marks the network Private. If you use another firewall or antivirus, allow the game on the `Lanfolk` adapter (`10.77.0.0/24`). Do not open Windows file sharing or Remote Desktop to the virtual network; Lanfolk blocks those ports on purpose (TCP 135, 139, 445, 3389, 5985-5986 and UDP 137-138).
+Lanfolk adds firewall rules for the virtual adapter and marks the network Private. If you use another firewall or antivirus, allow the game on the `Lanfolk` adapter (`10.77.0.0/24`). Do not open Windows file sharing or Remote Desktop to the virtual network; Lanfolk blocks those ports on purpose (TCP 135, 139, 445, 593, 2869, 3389, 5355, 5357-5358, 5985-5986, 10243 and UDP 137-138, 1900, 3389, 3702, 5355). Programs that run as Windows services are not reachable by members either; **Settings, Troubleshooting** has a switch for the rare game server that runs as a service.
 
 **Antivirus blocks the installer or the adapter.**
 Lanfolk's source code is public and it uses the signed Wintun driver DLL to create the adapter. If your antivirus quarantines a file, restore it, add an exception for `C:\Program Files\Lanfolk`, and check the SHA-256 checksums of the download against `SHA256SUMS`.

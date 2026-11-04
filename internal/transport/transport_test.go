@@ -251,3 +251,43 @@ func TestRelayClientTCPFallbackAndReturn(t *testing.T) {
 		t.Fatal("no data after returning to UDP")
 	}
 }
+
+func TestRelayClientAnswersChallenge(t *testing.T) {
+	cfg := relay.DefaultConfig()
+	cfg.UDPAddr, cfg.TCPAddr, cfg.MetricsAddr = "127.0.0.1:0", "127.0.0.1:0", ""
+	cfg.Challenge = relay.ChallengeAlways // as if the relay were under attack
+	srv, err := relay.New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { srv.Serve(ctx); close(done) }()
+	t.Cleanup(func() { cancel(); <-done })
+
+	a := newHarness(t, srv, fastOpts())
+	b := newHarness(t, srv, fastOpts())
+	waitMode(t, a.client, ModeUDP)
+	waitMode(t, b.client, ModeUDP)
+	sid := wire.SessionID{11}
+	a.client.Register(sid)
+	b.client.Register(sid)
+	deadline := time.Now().Add(3 * time.Second)
+	for !(a.client.PeerPresent(sid) && b.client.PeerPresent(sid)) {
+		if time.Now().After(deadline) {
+			t.Fatal("clients did not register through the cookie challenge")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if err := a.client.SendData(sid, []byte("through")); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case got := <-b.data:
+		if got != "through" {
+			t.Fatal(got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("no data after the challenge")
+	}
+}

@@ -227,7 +227,7 @@ func (e *Engine) RedeemInvite(code string) (ipc.RedeemResult, error) {
 				return nil
 			}
 		}
-		d.Friends = append(d.Friends, store.Friend{PublicKey: c.Owner.Hex(), AddedAt: time.Now().UTC()})
+		d.Friends = append(d.Friends, store.Friend{PublicKey: c.Owner.Hex(), AddedAt: time.Now().UTC(), ViaInvite: true})
 		return nil
 	})
 	if err != nil {
@@ -257,7 +257,8 @@ func (e *Engine) RedeemInvite(code string) (ipc.RedeemResult, error) {
 	return res, nil
 }
 
-// CancelJoin forgets a redeemed code. The owner stays in the friend list.
+// CancelJoin forgets a redeemed code. An owner who became a friend only
+// through this invite is removed again unless a network is shared.
 func (e *Engine) CancelJoin(id network.ID) error {
 	e.mu.Lock()
 	if e.pending[id] == nil {
@@ -269,7 +270,72 @@ func (e *Engine) CancelJoin(id network.ID) error {
 	e.syncInvitesLocked()
 	e.mu.Unlock()
 	e.publishInvites()
+	e.pruneInviteFriends()
 	return err
+}
+
+// dropInviteLocked forgets the invite of an owned network, so its code stops
+// working at once. The owner gets a fresh code the next time one is asked
+// for.
+func (e *Engine) dropInviteLocked(id network.ID) {
+	if _, ok := e.owned[id]; !ok {
+		return
+	}
+	delete(e.owned, id)
+	e.joinMu.Lock()
+	delete(e.joinTimes, id)
+	e.joinMu.Unlock()
+	if err := e.saveInvitesLocked(); err != nil {
+		e.log.Error("saving invites failed", "err", err)
+	}
+	e.syncInvitesLocked()
+}
+
+// pruneInviteFriends removes friendships that an invite created (ViaInvite)
+// once they serve nothing: no shared network, no join in progress in either
+// direction. Friends the user added by hand are never touched, and neither
+// is a friend added in the last cfg.InviteFriendGrace (its pending join may
+// not be recorded yet).
+func (e *Engine) pruneInviteFriends() {
+	keep := make(map[string]bool)
+	e.mu.Lock()
+	if e.ctx == nil || e.ctx.Err() != nil {
+		e.mu.Unlock()
+		return // not running (yet, or any more)
+	}
+	for _, l := range e.lists {
+		for _, m := range l.Members {
+			keep[m.PublicKey.Hex()] = true
+		}
+	}
+	for _, pj := range e.pending {
+		if pj.State == ipc.JoinWaiting || pj.State == ipc.JoinJoining {
+			keep[pj.code.Owner.Hex()] = true
+		}
+	}
+	e.mu.Unlock()
+	cutoff := time.Now().Add(-e.cfg.InviteFriendGrace)
+	removed := false
+	err := e.store.Update(func(d *store.Data) error {
+		out := d.Friends[:0]
+		for _, f := range d.Friends {
+			if f.ViaInvite && len(f.PendingNetworks) == 0 && !keep[f.PublicKey] && f.AddedAt.Before(cutoff) {
+				removed = true
+				continue
+			}
+			out = append(out, f)
+		}
+		d.Friends = out
+		return nil
+	})
+	if err != nil || !removed {
+		return
+	}
+	e.log.Info("removed friends that only an invite had added")
+	e.mu.Lock()
+	e.reconcileLocked()
+	e.mu.Unlock()
+	e.publishFriends()
 }
 
 // PendingJoins lists the invite codes the user redeemed and their progress.
@@ -423,7 +489,7 @@ func (e *Engine) addPendingFriend(m *peermsg.JoinRequest) error {
 			return errJoinRateLimited
 		}
 		d.Friends = append(d.Friends, store.Friend{PublicKey: m.Joiner.Hex(), Nickname: cleanText(m.Nickname, network.MaxNicknameLen),
-			AddedAt: time.Now().UTC(), PendingNetworks: []string{nid}})
+			AddedAt: time.Now().UTC(), PendingNetworks: []string{nid}, ViaInvite: true})
 		e.hasPending.Store(true)
 		return nil
 	})

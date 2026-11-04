@@ -151,19 +151,27 @@ func TestUpdateLaterSavesByItself(t *testing.T) {
 // read goroutine).
 func TestUpdateLaterDoesNotBlockOnSave(t *testing.T) {
 	s, _ := Open(t.TempDir())
-	started, release := make(chan struct{}), make(chan struct{})
-	go s.Update(func(d *Data) error {
-		close(started)
-		<-release // holds the store lock like a slow disk write
-		return nil
-	})
+	started, release, updated := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	go func() {
+		defer close(updated)
+		s.Update(func(d *Data) error {
+			close(started)
+			<-release // holds the store lock like a slow disk write
+			return nil
+		})
+	}()
 	<-started
 	done := make(chan struct{})
 	go func() { s.UpdateLater(func(d *Data) {}); close(done) }()
 	select {
 	case <-done:
 	case <-time.After(time.Second):
+		close(release)
 		t.Fatal("UpdateLater blocked behind Update")
 	}
 	close(release)
+	// Let the save finish (and the queued change with it) before the
+	// temporary directory is removed.
+	<-updated
+	s.Flush()
 }

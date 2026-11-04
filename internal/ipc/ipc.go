@@ -52,8 +52,10 @@ type Handler func(ctx context.Context, method string, params json.RawMessage) (a
 // Server accepts clients on a listener.
 type Server struct {
 	Handler Handler
-	// Authorize is called for every new connection before any request is
-	// served; returning an error closes the connection.
+	// Authorize is called once per connection, after the first request line
+	// has been read and before anything is served; returning an error
+	// closes the connection. (Windows can only identify a named pipe client
+	// by impersonation after data has been read from the pipe.)
 	Authorize func(conn net.Conn) error
 	Logger    *slog.Logger
 
@@ -75,6 +77,10 @@ type serverConn struct {
 	evOrder []string
 	evKick  chan struct{}
 }
+
+// firstRequestTimeout closes a connection that sends nothing to identify
+// itself with.
+const firstRequestTimeout = 30 * time.Second
 
 // eventWriteTimeout closes a client that has not read an event for this
 // long; it reconnects when it runs again.
@@ -154,13 +160,6 @@ func (s *Server) closeAll() {
 
 func (s *Server) handle(ctx context.Context, conn net.Conn) {
 	defer conn.Close()
-	if s.Authorize != nil {
-		if err := s.Authorize(conn); err != nil {
-			s.Logger.Warn("rejected control client", "err", err)
-			json.NewEncoder(conn).Encode(&Message{Error: &Error{Code: CodeUnauthorized, Message: err.Error()}})
-			return
-		}
-	}
 	sc := &serverConn{conn: conn, enc: json.NewEncoder(conn),
 		evData: make(map[string]json.RawMessage), evKick: make(chan struct{}, 1)}
 	done := make(chan struct{})
@@ -178,7 +177,21 @@ func (s *Server) handle(ctx context.Context, conn net.Conn) {
 	}()
 	sc2 := bufio.NewScanner(conn)
 	sc2.Buffer(make([]byte, 64*1024), MaxMessage)
+	authorized := s.Authorize == nil
+	if !authorized {
+		// A client that never sends its first request is not kept around.
+		conn.SetReadDeadline(time.Now().Add(firstRequestTimeout))
+	}
 	for sc2.Scan() {
+		if !authorized {
+			conn.SetReadDeadline(time.Time{})
+			if err := s.Authorize(conn); err != nil {
+				s.Logger.Warn("rejected control client", "err", err)
+				sc.send(&Message{Error: &Error{Code: CodeUnauthorized, Message: err.Error()}})
+				return
+			}
+			authorized = true
+		}
 		var req Request
 		if err := json.Unmarshal(sc2.Bytes(), &req); err != nil {
 			sc.send(&Message{Error: &Error{Code: CodeInvalid, Message: "malformed request"}})

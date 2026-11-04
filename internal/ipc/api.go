@@ -180,6 +180,9 @@ type Settings struct {
 	// Desktop app: Windows notifications and the daily update check.
 	Notifications bool `json:"notifications"`
 	CheckUpdates  bool `json:"check_updates"`
+	// AllowServices lets members reach programs that run as Windows
+	// services (troubleshooting). Off by default.
+	AllowServices bool `json:"allow_services"`
 }
 
 // Parameter and result types.

@@ -9,13 +9,16 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sync/atomic"
 	"testing"
 	"time"
 )
 
+var testSeq atomic.Uint64
+
 func testAddr(t *testing.T) string {
 	if runtime.GOOS == "windows" {
-		return fmt.Sprintf(`\\.\pipe\lanfolk-test-%d-%d`, os.Getpid(), time.Now().UnixNano())
+		return fmt.Sprintf(`\\.\pipe\lanfolk-test-%d-%d-%d`, os.Getpid(), time.Now().UnixNano(), testSeq.Add(1))
 	}
 	return filepath.Join(t.TempDir(), "l.sock")
 }

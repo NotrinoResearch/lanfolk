@@ -57,8 +57,8 @@ when a game doesn't find the other players.
   another member or a relay server when not. Traffic is encrypted with
   WireGuard; a relay only forwards packets it cannot read.
 - Only traffic for the virtual network goes through Lanfolk. Your normal
-  internet traffic doesn't, and Windows file sharing and remote desktop stay
-  blocked between members.
+  internet traffic doesn't. Windows file sharing, remote desktop and programs
+  that run as Windows services stay out of reach of other members.
 - There are no accounts. Your identity is a key on your computer, and only
   people with your invite can join your network.
 

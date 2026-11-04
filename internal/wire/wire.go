@@ -139,7 +139,18 @@ const (
 	RelayPeerJoined  byte = 0x08
 	RelayEchoRequest byte = 0x09
 	RelayEchoReply   byte = 0x0A
+	// RelayChallenge asks the sender of a Register to prove that it receives
+	// traffic at its source address: it carries a cookie that the client
+	// appends to the repeated Register. A relay sends it only under load.
+	RelayChallenge byte = 0x0B
 )
+
+// CookieSize is the length of a Register cookie.
+const CookieSize = 16
+
+// Cookie is the relay's stateless proof that a client receives traffic at
+// the address it registered from.
+type Cookie [CookieSize]byte
 
 // Reject codes.
 const (
@@ -161,6 +172,9 @@ type RelayControl struct {
 	Nonce       uint64
 	Code        byte
 	DelaySec    byte
+	// Cookie is set by Challenge, and by Register when HasCookie is true.
+	Cookie    Cookie
+	HasCookie bool
 }
 
 func relayHeader(b []byte, typ byte) []byte {
@@ -172,6 +186,20 @@ func AppendRegister(b []byte, s SessionID, t Token) []byte {
 	b = relayHeader(b, RelayRegister)
 	b = append(b, s[:]...)
 	return append(b, t[:]...)
+}
+
+// AppendRegisterCookie appends a Register message that carries the cookie
+// of a Challenge. Relays without cookie support ignore the trailing bytes.
+func AppendRegisterCookie(b []byte, s SessionID, t Token, c Cookie) []byte {
+	b = AppendRegister(b, s, t)
+	return append(b, c[:]...)
+}
+
+// AppendChallenge appends a Challenge message.
+func AppendChallenge(b []byte, s SessionID, c Cookie) []byte {
+	b = relayHeader(b, RelayChallenge)
+	b = append(b, s[:]...)
+	return append(b, c[:]...)
 }
 
 // AppendUnregister appends an Unregister message.
@@ -254,6 +282,16 @@ func ParseRelayControl(b []byte) (RelayControl, error) {
 		}
 		copy(m.Session[:], p[:16])
 		copy(m.Token[:], p[16:24])
+		if m.Type == RelayRegister && len(p) >= 24+CookieSize {
+			copy(m.Cookie[:], p[24:24+CookieSize])
+			m.HasCookie = true
+		}
+	case RelayChallenge:
+		if len(p) < 16+CookieSize {
+			return m, errShort
+		}
+		copy(m.Session[:], p[:16])
+		copy(m.Cookie[:], p[16:16+CookieSize])
 	case RelayRegisterAck:
 		if len(p) < 17 {
 			return m, errShort

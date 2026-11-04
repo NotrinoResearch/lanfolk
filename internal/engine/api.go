@@ -17,6 +17,7 @@ import (
 	"github.com/NotrinoResearch/lanfolk/internal/network"
 	"github.com/NotrinoResearch/lanfolk/internal/pathmgr"
 	"github.com/NotrinoResearch/lanfolk/internal/store"
+	"github.com/NotrinoResearch/lanfolk/internal/tunwrap"
 	"github.com/NotrinoResearch/lanfolk/internal/version"
 )
 
@@ -32,8 +33,18 @@ func (e *Engine) AddFriend(code, nickname string) (ipc.Friend, error) {
 	}
 	nickname = cleanText(nickname, network.MaxNicknameLen)
 	err = e.store.Update(func(d *store.Data) error {
-		for _, f := range d.Friends {
+		for i := range d.Friends {
+			f := &d.Friends[i]
 			if f.PublicKey == pk.Hex() {
+				if f.ViaInvite {
+					// Added by an invite before; now the user wants to keep
+					// this friend for good.
+					f.ViaInvite = false
+					if nickname != "" {
+						f.Nickname = nickname
+					}
+					return nil
+				}
 				return ipc.Errorf(ipc.CodeInvalid, "this friend is already in your list")
 			}
 		}
@@ -308,7 +319,8 @@ func (e *Engine) Settings() ipc.Settings {
 	defer e.mu.Unlock()
 	s := ipc.Settings{RelayOnly: e.settings.RelayOnly, CompatMode: e.settings.CompatMode, ManualPort: e.settings.ManualPort,
 		PortMapping: e.settings.PortMapping, DHTFallback: e.settings.DHTFallback,
-		Notifications: !e.settings.NotificationsOff, CheckUpdates: !e.settings.UpdateCheckOff}
+		Notifications: !e.settings.NotificationsOff, CheckUpdates: !e.settings.UpdateCheckOff,
+		AllowServices: e.settings.AllowServices}
 	for _, r := range e.settings.CustomRelays {
 		s.CustomRelays = append(s.CustomRelays, ipc.Relay{Host: r.Host, UDPPort: r.UDPPort, TCPPort: r.TCPPort})
 	}
@@ -342,6 +354,7 @@ func (e *Engine) SetSettings(s ipc.Settings) (ipc.Settings, error) {
 		d.Settings.RelayOnly, d.Settings.CompatMode, d.Settings.ManualPort = s.RelayOnly, s.CompatMode, s.ManualPort
 		d.Settings.PortMapping, d.Settings.DHTFallback, d.Settings.CustomRelays = s.PortMapping, s.DHTFallback, relays
 		d.Settings.NotificationsOff, d.Settings.UpdateCheckOff = !s.Notifications, !s.CheckUpdates
+		d.Settings.AllowServices = s.AllowServices
 		return nil
 	})
 	if err != nil {
@@ -396,8 +409,9 @@ func (e *Engine) ImportIdentity(backup, password string) error {
 	})
 }
 
-// Diagnostics returns a JSON report for troubleshooting. It contains
-// addresses, so the UI warns before sharing it.
+// Diagnostics returns a JSON report for troubleshooting. Users attach it to
+// public bug reports, so public IP addresses are shortened, keys are cut to
+// key prefixes and the friend code is left out (see redact.go).
 func (e *Engine) Diagnostics() string {
 	type pathDump struct {
 		Kind, Source, Addr, Via string
@@ -418,10 +432,22 @@ func (e *Engine) Diagnostics() string {
 		Settings   ipc.Settings
 		Candidates []string
 		Peers      []peerDump
+		// Tunnel counts the virtual LAN's packets, including what the
+		// filters dropped (DroppedBlocked, DroppedService).
+		Tunnel *tunwrap.Stats `json:",omitempty"`
 	}{Generated: now.UTC(), OS: runtime.GOOS + "/" + runtime.GOARCH, Status: e.Status(), Settings: e.Settings()}
+	redactStatus(&rep.Status)
+	for i := range rep.Settings.CustomRelays {
+		rep.Settings.CustomRelays[i].Host = redactHostPort(rep.Settings.CustomRelays[i].Host)
+	}
+	rep.Settings.DefaultRelay = redactHostPort(rep.Settings.DefaultRelay)
 	e.mu.Lock()
 	for _, c := range e.cands {
-		rep.Candidates = append(rep.Candidates, c.source.String()+" "+c.addr.String())
+		rep.Candidates = append(rep.Candidates, c.source.String()+" "+redactAddrPort(c.addr))
+	}
+	if e.tunnel != nil && e.tunnel.wrap != nil {
+		st := e.tunnel.wrap.Stats()
+		rep.Tunnel = &st
 	}
 	peers := e.peerListLocked()
 	e.mu.Unlock()
@@ -434,7 +460,7 @@ func (e *Engine) Diagnostics() string {
 		p.mu.Lock()
 		if p.pm != nil {
 			for _, pi := range p.pm.Paths(nanotime()) {
-				d.Paths = append(d.Paths, pathDump{Kind: pi.Kind.String(), Source: pi.Source.String(), Addr: pi.Addr.String(),
+				d.Paths = append(d.Paths, pathDump{Kind: pi.Kind.String(), Source: pi.Source.String(), Addr: redactAddrPort(pi.Addr),
 					Via: pi.Via.String(), Alive: pi.Alive, Active: pi.Active, SRTTms: ms(pi.SRTT)})
 			}
 		}

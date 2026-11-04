@@ -26,6 +26,13 @@ type metrics struct {
 	droppedUnregistered atomic.Uint64
 	droppedInvalid      atomic.Uint64
 	droppedQueue        atomic.Uint64
+	droppedIPRate       atomic.Uint64
+	droppedTotalRate    atomic.Uint64
+	challenges          atomic.Uint64
+	cookieRejects       atomic.Uint64
+	tcpRejects          atomic.Uint64
+	tcpIdleClosed       atomic.Uint64
+	echoRejects         atomic.Uint64
 }
 
 func (s *Server) writeMetrics(w http.ResponseWriter) {
@@ -53,6 +60,18 @@ func (s *Server) writeMetrics(w http.ResponseWriter) {
 	line("lanfolk_relay_dropped_unregistered_total", "counter", "Data packets from unregistered sources.", m.droppedUnregistered.Load())
 	line("lanfolk_relay_dropped_invalid_total", "counter", "Malformed or unknown packets.", m.droppedInvalid.Load())
 	line("lanfolk_relay_dropped_queue_total", "counter", "Packets dropped on full TCP queues.", m.droppedQueue.Load())
+	line("lanfolk_relay_dropped_ip_rate_total", "counter", "Data packets dropped by the per-IP cap.", m.droppedIPRate.Load())
+	line("lanfolk_relay_dropped_total_rate_total", "counter", "Data packets dropped by the total cap.", m.droppedTotalRate.Load())
+	line("lanfolk_relay_challenges_total", "counter", "Register cookies requested under pressure.", m.challenges.Load())
+	line("lanfolk_relay_cookie_rejects_total", "counter", "Registers with a wrong or expired cookie.", m.cookieRejects.Load())
+	line("lanfolk_relay_tcp_rejects_total", "counter", "TCP connections refused by the per-IP or total cap.", m.tcpRejects.Load())
+	line("lanfolk_relay_tcp_idle_closed_total", "counter", "TCP connections closed without a session.", m.tcpIdleClosed.Load())
+	line("lanfolk_relay_echo_rejects_total", "counter", "Delayed echoes refused by the per-IP or total cap.", m.echoRejects.Load())
+	pressure := 0
+	if s.pressure.Load() {
+		pressure = 1
+	}
+	line("lanfolk_relay_under_pressure", "gauge", "1 while new UDP registrations need a cookie.", pressure)
 }
 
 func (s *Server) serveHTTP(wg *sync.WaitGroup) (stop func()) {

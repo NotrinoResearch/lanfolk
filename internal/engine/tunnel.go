@@ -63,12 +63,17 @@ func (e *Engine) buildTunnel(self netip.Addr) (*tunnel, error) {
 	}
 	t := &tunnel{dev: dev, self: self, peers: make(map[identity.PublicKey]netip.Addr)}
 	selfAddr := self
+	var servicePort func(uint8, uint16) bool
+	if e.cfg.ServicePort != nil {
+		servicePort = e.servicePort
+	}
 	t.wrap = tunwrap.Wrap(dev, tunwrap.Config{
-		Self:    func() netip.Addr { return selfAddr },
-		Peers:   e.onlinePeerVIPs,
-		Blocked: e.cfg.Blocked,
-		Prefix:  network.Prefix,
-		Logger:  e.log.With("component", "lan"),
+		Self:        func() netip.Addr { return selfAddr },
+		Peers:       e.onlinePeerVIPs,
+		Blocked:     e.cfg.Blocked,
+		ServicePort: servicePort,
+		Prefix:      network.Prefix,
+		Logger:      e.log.With("component", "lan"),
 	})
 	if e.cfg.NewAdapter != nil {
 		a, err := e.cfg.NewAdapter(dev)

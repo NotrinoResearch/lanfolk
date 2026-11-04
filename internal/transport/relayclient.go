@@ -56,6 +56,24 @@ type sessState struct {
 	present  bool
 	lastSent time.Time
 	lastAck  time.Time
+
+	// Register cookie from the relay's last Challenge (protocol 4.3).
+	cookie       wire.Cookie
+	cookieAt     time.Time
+	cookieAnswer time.Time // last Register sent in answer to a Challenge
+}
+
+// cookieFresh is how long a Challenge cookie is sent along with refreshes.
+// The relay accepts a cookie for at least 30 s.
+const cookieFresh = 25 * time.Second
+
+// registerFrame builds the Register for sid, with the session's cookie while
+// it is fresh. Callers hold c.mu.
+func (c *RelayClient) registerFrame(sid wire.SessionID, s *sessState, now time.Time) []byte {
+	if s != nil && !s.cookieAt.IsZero() && now.Sub(s.cookieAt) < cookieFresh {
+		return wire.AppendRegisterCookie(nil, sid, c.token, s.cookie)
+	}
+	return wire.AppendRegister(nil, sid, c.token)
 }
 
 // RelayClient keeps the connection to the shared relay: UDP on the shared
@@ -370,17 +388,17 @@ func (c *RelayClient) refreshRegistrations(now time.Time) {
 	if c.Mode() == ModeDown {
 		return
 	}
-	var due []wire.SessionID
+	var due [][]byte
 	c.mu.Lock()
 	for sid, s := range c.sessions {
 		if now.Sub(s.lastSent) >= c.opts.RegisterInterval {
 			s.lastSent = now
-			due = append(due, sid)
+			due = append(due, c.registerFrame(sid, s, now))
 		}
 	}
 	c.mu.Unlock()
-	for _, sid := range due {
-		c.sendFrame(wire.AppendRegister(nil, sid, c.token))
+	for _, f := range due {
+		c.sendFrame(f)
 	}
 }
 
@@ -495,6 +513,31 @@ func (c *RelayClient) handleControl(m wire.RelayControl, viaTCP bool) {
 	case wire.RelayEchoReply:
 		if c.opts.OnEcho != nil {
 			c.opts.OnEcho(m.Nonce, m.Addr)
+		}
+	case wire.RelayChallenge:
+		// The relay is under load and wants proof that we receive at our
+		// address: repeat the Register with its cookie at once. At most one
+		// answer per session and second, so a confused relay cannot make us
+		// loop.
+		c.mu.Lock()
+		s := c.sessions[m.Session]
+		if s == nil || now.Sub(s.cookieAnswer) < time.Second {
+			c.mu.Unlock()
+			return
+		}
+		s.cookie, s.cookieAt, s.cookieAnswer = m.Cookie, now, now
+		s.lastSent = now
+		f := c.registerFrame(m.Session, s, now)
+		c.mu.Unlock()
+		c.log.Debug("relay asked for a register cookie")
+		if viaTCP {
+			if t := c.tcp.Load(); t != nil {
+				t.send(f)
+			}
+			return
+		}
+		if a := c.UDPAddr(); a.IsValid() {
+			c.sock.WriteTo(f, a)
 		}
 	}
 }

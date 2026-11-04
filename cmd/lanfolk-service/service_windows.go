@@ -141,6 +141,11 @@ func install(o options) error {
 	if err := winnet.EnsureFirewallRules(exe); err != nil {
 		return fmt.Errorf("firewall rules: %w", err)
 	}
+	// The data folder is private to the service before anything is written.
+	// The service repeats this at every start, so a failure here only warns.
+	if _, err := prepareDataDir(o); err != nil {
+		fmt.Fprintln(os.Stderr, "warning: could not make the data folder private:", err)
+	}
 	// The installing user owns the control pipe.
 	if sid := currentUserSID(); sid != "" {
 		st, err := store.Open(o.dataDir)

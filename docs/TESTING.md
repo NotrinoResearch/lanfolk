@@ -144,6 +144,25 @@ Test-NetConnection 10.77.0.2 -Port 3389    # expected: TcpTestSucceeded False
 
 and `lanprobe test` reports "Windows service ports blocked" as PASS. Also check that a game port still works (`lanprobe test` unicast).
 
+Service filter (D-033): Delivery Optimization usually listens on TCP 7680 as
+a Windows service (check with `netstat -ano | findstr :7680` on the target),
+so it must be unreachable, while a program started on the desktop is
+reachable:
+
+```powershell
+Test-NetConnection 10.77.0.2 -Port 7680    # expected: TcpTestSucceeded False
+# on 10.77.0.2: python -m http.server 8000 (or any desktop listener)
+Test-NetConnection 10.77.0.2 -Port 8000    # expected: TcpTestSucceeded True
+```
+
+With **Settings, Troubleshooting, Let members reach Windows services** on,
+port 7680 answers. The diagnostic report counts the drops under
+`Tunnel.DroppedService`.
+
+Data folder (D-033): `icacls C:\ProgramData\Lanfolk` lists only
+`NT AUTHORITY\SYSTEM` and `BUILTIN\Administrators`, without `(I)`, and the
+same for `lanfolk.json` and `logs`.
+
 After `lanfolk-service.exe uninstall` there must be no `Lanfolk` adapter and no rule in the group:
 
 ```powershell

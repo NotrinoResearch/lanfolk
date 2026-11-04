@@ -43,6 +43,10 @@ type Friend struct {
 	// join with an invite code. The friend is added to each as soon as the
 	// friendship is active (docs/DECISIONS.md D-025).
 	PendingNetworks []string `json:"pending_networks,omitempty"`
+	// ViaInvite is set when the friend was added automatically by an invite
+	// (owner or joiner side) rather than by the user. Such a friendship ends
+	// by itself once no network is shared any more.
+	ViaInvite bool `json:"via_invite,omitempty"`
 }
 
 // Invite is the invite code an owner created for one owned network.
@@ -115,6 +119,9 @@ type Settings struct {
 	// they existed keep the default (on).
 	NotificationsOff bool `json:"notifications_off,omitempty"`
 	UpdateCheckOff   bool `json:"update_check_off,omitempty"`
+	// AllowServices lets members reach ports that only Windows services
+	// listen on (troubleshooting; off by default).
+	AllowServices bool `json:"allow_services,omitempty"`
 }
 
 // Data is the whole file.

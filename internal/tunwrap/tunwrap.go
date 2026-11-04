@@ -44,6 +44,13 @@ type Config struct {
 	// to the destination port of broadcast and multicast UDP. Nil allows
 	// everything.
 	Blocked func(proto uint8, port uint16) bool
+	// ServicePort reports whether a local port (6 TCP, 17 UDP) is owned only
+	// by system services, which members must not reach. It is asked for
+	// inbound UDP (unicast, broadcast and multicast) and for inbound TCP
+	// connection attempts (SYN without ACK), so replies to connections this
+	// machine opened are never affected. It runs on the packet path and must
+	// be fast. Nil allows everything.
+	ServicePort func(proto uint8, port uint16) bool
 	// Prefix is the virtual network, 10.77.0.0/24. Zero value means that.
 	Prefix netip.Prefix
 	// MaxCopiesPerSecond is the token bucket rate for fan-out copies.
@@ -62,6 +69,7 @@ type Stats struct {
 	Injected     uint64 // captured local broadcasts accepted by InjectLocalBroadcast
 
 	DroppedBlocked   uint64 // destination port on the denylist
+	DroppedService   uint64 // inbound to a port owned only by system services
 	DroppedIPv6      uint64 // IPv6 packets
 	DroppedSpoofed   uint64 // source address not allowed
 	DroppedMalformed uint64 // invalid packet or LanFrame
@@ -73,6 +81,7 @@ type Stats struct {
 type counters struct {
 	unicastOut, unicastIn, lanOut, lanIn, injected        atomic.Uint64
 	blocked, ipv6, spoofed, malformed, rate, queue, other atomic.Uint64
+	service                                               atomic.Uint64
 }
 
 const (
@@ -245,6 +254,7 @@ func (d *Device) Stats() Stats {
 		LanFramesIn:      c.lanIn.Load(),
 		Injected:         c.injected.Load(),
 		DroppedBlocked:   c.blocked.Load(),
+		DroppedService:   c.service.Load(),
 		DroppedIPv6:      c.ipv6.Load(),
 		DroppedSpoofed:   c.spoofed.Load(),
 		DroppedMalformed: c.malformed.Load(),
@@ -353,6 +363,34 @@ func (d *Device) portBlocked(pkt []byte, h *ipv4Header) (blocked, malformed bool
 	port := uint16(pkt[h.ihl+2])<<8 | uint16(pkt[h.ihl+3])
 	return d.cfg.Blocked(h.proto, port), false
 }
+
+// toService reports whether an inbound packet would reach a local port that
+// only system services own: a UDP datagram, or a TCP connection attempt.
+func (d *Device) toService(pkt []byte, h *ipv4Header) bool {
+	if d.cfg.ServicePort == nil || h.fragOff != 0 {
+		return false
+	}
+	switch h.proto {
+	case protoUDP:
+	case protoTCP:
+		if h.total-h.ihl < 14 {
+			return false
+		}
+		if flags := pkt[h.ihl+13]; flags&tcpSYN == 0 || flags&tcpACK != 0 {
+			return false
+		}
+	default:
+		return false
+	}
+	port := uint16(pkt[h.ihl+2])<<8 | uint16(pkt[h.ihl+3])
+	return d.cfg.ServicePort(h.proto, port)
+}
+
+// TCP header flags.
+const (
+	tcpSYN = 0x02
+	tcpACK = 0x10
+)
 
 // ---- Outbound: Read ----
 
@@ -681,6 +719,10 @@ func (d *Device) inbound(b []byte, offset int, self [4]byte, selfOK bool) []byte
 		d.stats.blocked.Add(1)
 		return nil
 	}
+	if d.toService(pkt, &h) {
+		d.stats.service.Add(1)
+		return nil
+	}
 	d.stats.unicastIn.Add(1)
 	return b[:offset+h.total]
 }
@@ -728,6 +770,10 @@ func (d *Device) inboundLanFrame(b []byte, offset int, pkt []byte, h *ipv4Header
 	}
 	if blocked, _ := d.portBlocked(inner, &ih); blocked {
 		d.stats.blocked.Add(1)
+		return nil
+	}
+	if d.toService(inner, &ih) {
+		d.stats.service.Add(1)
 		return nil
 	}
 	setSource(inner, &ih, h.src)

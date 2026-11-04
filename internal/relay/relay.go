@@ -34,7 +34,64 @@ type Config struct {
 	MaxEchoDelay     time.Duration
 	UDPReaders       int // goroutines reading the UDP socket (default 1)
 	Logger           *slog.Logger
+
+	// MaxIPKbps caps the relay data one source IP (IPv6: one /64) may send,
+	// over all its sessions. 0 disables the cap.
+	MaxIPKbps int
+	// MaxTotalMbps caps all forwarded relay data, so that the relay cannot
+	// saturate a host it shares with other services. 0 disables the cap.
+	MaxTotalMbps int
+	// MaxTCPConns caps open TCP fallback connections in total.
+	MaxTCPConns int
+	// TCPGrace closes a TCP connection that holds no session and has sent
+	// nothing for this long.
+	TCPGrace time.Duration
+	// MaxEchoesPerIP caps pending delayed echoes per source IP.
+	MaxEchoesPerIP int
+	// Challenge selects when a UDP Register that would create a new session
+	// or party must carry a cookie (see ChallengeMode).
+	Challenge ChallengeMode
+	// ChallengeSessionsPct switches cookies on while the session table is at
+	// least this full (percent of MaxSessions). 0 disables this trigger.
+	ChallengeSessionsPct int
+	// ChallengeNewPerSec switches cookies on while more than this many new
+	// sessions or parties are requested over UDP per second. 0 disables
+	// this trigger.
+	ChallengeNewPerSec int
 }
+
+// ChallengeMode controls the Register cookie (protocol section 4.3).
+type ChallengeMode int
+
+const (
+	// ChallengeAuto asks for cookies only while the relay is under pressure.
+	ChallengeAuto ChallengeMode = iota
+	// ChallengeOff never asks for cookies.
+	ChallengeOff
+	// ChallengeAlways asks for a cookie for every new session or party
+	// registered over UDP. Clients before release 0.4 cannot register then.
+	ChallengeAlways
+)
+
+// ParseChallengeMode parses "auto", "off" or "always".
+func ParseChallengeMode(s string) (ChallengeMode, error) {
+	switch s {
+	case "", "auto":
+		return ChallengeAuto, nil
+	case "off":
+		return ChallengeOff, nil
+	case "always":
+		return ChallengeAlways, nil
+	}
+	return ChallengeAuto, fmt.Errorf("challenge mode must be auto, off or always, not %q", s)
+}
+
+// pressureHold keeps cookies switched on for this long after the last
+// trigger, so that the mode does not flap during an attack.
+const pressureHold = 30 * time.Second
+
+// maxPendingEchoes bounds scheduled delayed echoes in total.
+const maxPendingEchoes = 4096
 
 // DefaultConfig returns production defaults.
 func DefaultConfig() Config {
@@ -50,6 +107,15 @@ func DefaultConfig() Config {
 		SweepInterval:    10 * time.Second,
 		ControlPerIPRate: 200,
 		MaxEchoDelay:     180 * time.Second,
+
+		MaxIPKbps:            20000,
+		MaxTotalMbps:         400,
+		MaxTCPConns:          2048,
+		TCPGrace:             15 * time.Second,
+		MaxEchoesPerIP:       8,
+		Challenge:            ChallengeAuto,
+		ChallengeSessionsPct: 50,
+		ChallengeNewPerSec:   1000,
 	}
 }
 
@@ -103,10 +169,22 @@ type Server struct {
 	perIP    map[netip.Addr]int
 	tcpMu    sync.Mutex
 	tcpPerIP map[netip.Addr]int
-	limiter  *ipLimiter
+	tcpConns map[*tcpConn]struct{}
+	limiter  *ipBuckets // control and STUN messages per IP
+	ipData   *ipBuckets // relay data bytes per IP; nil = no cap
+	total    tokenBucket
+	cookies  *cookieMaker
 	echoes   atomic.Int64
+	echoMu   sync.Mutex
+	echoIP   map[netip.Addr]int
 	metrics  metrics
 	started  time.Time
+
+	// Pressure detection for Register cookies; guarded by mu.
+	newWindow     int64 // start of the current one-second window (unix ns)
+	newCount      int   // new-party requests over UDP in that window
+	pressureUntil int64 // cookies are required until this time (unix ns)
+	pressure      atomic.Bool
 }
 
 // New binds the relay sockets. Call Serve to start processing.
@@ -136,6 +214,15 @@ func New(cfg Config) (*Server, error) {
 	if cfg.MaxEchoDelay <= 0 {
 		cfg.MaxEchoDelay = def.MaxEchoDelay
 	}
+	if cfg.MaxTCPConns <= 0 {
+		cfg.MaxTCPConns = def.MaxTCPConns
+	}
+	if cfg.TCPGrace <= 0 {
+		cfg.TCPGrace = def.TCPGrace
+	}
+	if cfg.MaxEchoesPerIP <= 0 {
+		cfg.MaxEchoesPerIP = def.MaxEchoesPerIP
+	}
 	if cfg.Logger == nil {
 		cfg.Logger = slog.New(slog.DiscardHandler)
 	}
@@ -145,8 +232,15 @@ func New(cfg Config) (*Server, error) {
 		sessions: make(map[wire.SessionID]*session),
 		perIP:    make(map[netip.Addr]int),
 		tcpPerIP: make(map[netip.Addr]int),
-		limiter:  newIPLimiter(cfg.ControlPerIPRate, cfg.ControlPerIPRate*3),
+		tcpConns: make(map[*tcpConn]struct{}),
+		limiter:  newIPBuckets(cfg.ControlPerIPRate, cfg.ControlPerIPRate*3),
+		cookies:  newCookieMaker(),
+		echoIP:   make(map[netip.Addr]int),
 		started:  time.Now(),
+	}
+	if cfg.MaxIPKbps > 0 {
+		rate := float64(cfg.MaxIPKbps) * 1000 / 8 // bytes per second
+		s.ipData = newIPBuckets(rate, rate)       // burst of one second
 	}
 	ua, err := net.ResolveUDPAddr("udp", cfg.UDPAddr)
 	if err != nil {
@@ -275,13 +369,13 @@ func (s *Server) handle(b []byte, src endpoint) {
 	case wire.ClassRelayData:
 		s.handleData(b, src)
 	case wire.ClassRelayControl:
-		if !s.limiter.allow(src.ip()) {
+		if !s.limiter.allow(src.ip(), 1, time.Now().UnixNano()) {
 			s.metrics.droppedRate.Add(1)
 			return
 		}
 		s.handleControl(b, src)
 	case wire.ClassSTUN:
-		if !s.limiter.allow(src.ip()) {
+		if !s.limiter.allow(src.ip(), 1, time.Now().UnixNano()) {
 			s.metrics.droppedRate.Add(1)
 			return
 		}
@@ -326,8 +420,18 @@ func (s *Server) handleData(b []byte, src endpoint) {
 		s.metrics.droppedNoPeer.Add(1)
 		return
 	}
+	// The per-IP cap comes first, so a flooding source spends neither its
+	// sessions' budget nor the relay's total budget.
+	if s.ipData != nil && !s.ipData.allow(src.ip(), float64(len(b)), now) {
+		s.metrics.droppedIPRate.Add(1)
+		return
+	}
 	if !sess.bucket.allow(len(b), now, s.cfg.MaxSessionKbps) {
 		s.metrics.droppedRate.Add(1)
+		return
+	}
+	if s.cfg.MaxTotalMbps > 0 && !s.total.allow(len(b), now, s.cfg.MaxTotalMbps*1000) {
+		s.metrics.droppedTotalRate.Add(1)
 		return
 	}
 	s.metrics.forwardedPackets.Add(1)
@@ -368,16 +472,38 @@ func (s *Server) register(m wire.RelayControl, src endpoint) {
 	doNotify := false
 	reject := byte(0)
 	present := false
+	challenge := false
+	srcKey := limitKey(src.ip())
 
 	s.mu.Lock()
 	sess := s.sessions[m.Session]
+	var known *party
+	if sess != nil {
+		for _, p := range sess.parties {
+			if p != nil && p.token == m.Token {
+				known = p
+			}
+		}
+	}
+	// A Register that would create a new session or a new party must carry
+	// a valid cookie while the relay is under pressure (UDP only: a TCP
+	// connection has already proven its source address).
+	if known == nil && src.tcp == nil && s.needCookieLocked(now) {
+		if !m.HasCookie || !s.cookies.valid(src.udp, m.Session, m.Cookie, now/1e9) {
+			if m.HasCookie {
+				s.metrics.cookieRejects.Add(1)
+			}
+			challenge = true
+		}
+	}
 	switch {
+	case challenge:
 	case sess == nil:
 		if len(s.sessions) >= s.cfg.MaxSessions {
 			reject = wire.RejectBusy
 			break
 		}
-		if s.perIP[src.ip()] >= s.cfg.MaxSessionsPerIP {
+		if s.perIP[srcKey] >= s.cfg.MaxSessionsPerIP {
 			reject = wire.RejectSessionLimit
 			break
 		}
@@ -385,32 +511,28 @@ func (s *Server) register(m wire.RelayControl, src endpoint) {
 		sess.parties[0] = s.newParty(m.Session, m.Token, src, now)
 		s.sessions[m.Session] = sess
 		s.metrics.registrations.Add(1)
-	default:
-		idx := -1
-		for i, p := range sess.parties {
-			if p != nil && p.token == m.Token {
-				idx = i
-			}
+	case known != nil:
+		idx := 0
+		if sess.parties[1] == known {
+			idx = 1
 		}
-		if idx >= 0 {
-			p := sess.parties[idx]
-			if !p.ep.equal(src) {
-				if p.ep.ip() != src.ip() {
-					if s.perIP[src.ip()] >= s.cfg.MaxSessionsPerIP {
-						reject = wire.RejectSessionLimit
-						break
-					}
-					s.decIP(p.ep.ip())
-					s.perIP[src.ip()]++
+		p := known
+		if !p.ep.equal(src) {
+			if oldKey := limitKey(p.ep.ip()); oldKey != srcKey {
+				if s.perIP[srcKey] >= s.cfg.MaxSessionsPerIP {
+					reject = wire.RejectSessionLimit
+					break
 				}
-				s.untrackTCP(p.ep, sess.id)
-				p.ep = src
-				s.trackTCP(src, sess.id)
+				s.decIP(oldKey)
+				s.perIP[srcKey]++
 			}
-			p.lastSeen.Store(now)
-			present = sess.parties[1-idx] != nil
-			break
+			s.untrackTCP(p.ep, sess.id)
+			p.ep = src
+			s.trackTCP(src, sess.id)
 		}
+		p.lastSeen.Store(now)
+		present = sess.parties[1-idx] != nil
+	default:
 		free := -1
 		for i, p := range sess.parties {
 			if p == nil {
@@ -431,7 +553,7 @@ func (s *Server) register(m wire.RelayControl, src endpoint) {
 			reject = wire.RejectSessionFull
 			break
 		}
-		if s.perIP[src.ip()] >= s.cfg.MaxSessionsPerIP {
+		if s.perIP[srcKey] >= s.cfg.MaxSessionsPerIP {
 			reject = wire.RejectSessionLimit
 			break
 		}
@@ -444,6 +566,11 @@ func (s *Server) register(m wire.RelayControl, src endpoint) {
 	}
 	s.mu.Unlock()
 
+	if challenge {
+		s.metrics.challenges.Add(1)
+		s.send(src, wire.AppendChallenge(nil, m.Session, s.cookies.current(src.udp, m.Session, now/1e9)))
+		return
+	}
 	if reject != 0 {
 		s.metrics.rejects.Add(1)
 		s.send(src, wire.AppendReject(nil, m.Session, reject))
@@ -455,11 +582,48 @@ func (s *Server) register(m wire.RelayControl, src endpoint) {
 	}
 }
 
+// needCookieLocked counts a request for a new session or party over UDP and
+// reports whether it must carry a cookie. s.mu must be held.
+func (s *Server) needCookieLocked(now int64) bool {
+	switch s.cfg.Challenge {
+	case ChallengeOff:
+		return false
+	case ChallengeAlways:
+		return true
+	}
+	if now-s.newWindow >= int64(time.Second) {
+		s.newWindow, s.newCount = now, 0
+	}
+	s.newCount++
+	trigger := s.cfg.ChallengeNewPerSec > 0 && s.newCount > s.cfg.ChallengeNewPerSec
+	if pct := s.cfg.ChallengeSessionsPct; pct > 0 && len(s.sessions)*100 >= s.cfg.MaxSessions*pct {
+		trigger = true
+	}
+	if trigger {
+		if s.pressure.CompareAndSwap(false, true) {
+			s.log.Warn("relay under pressure: new UDP registrations need a cookie",
+				"sessions", len(s.sessions), "new_per_sec", s.newCount)
+		}
+		s.pressureUntil = now + int64(pressureHold)
+	}
+	return s.pressureOnLocked(now)
+}
+
+// pressureOnLocked reports whether cookies are required at now and logs the
+// end of a pressure period. s.mu must be held.
+func (s *Server) pressureOnLocked(now int64) bool {
+	on := now < s.pressureUntil
+	if !on && s.pressure.CompareAndSwap(true, false) {
+		s.log.Info("relay pressure ended: cookies no longer required")
+	}
+	return on
+}
+
 // newParty must be called with s.mu held.
 func (s *Server) newParty(sid wire.SessionID, t wire.Token, ep endpoint, now int64) *party {
 	p := &party{token: t, ep: ep}
 	p.lastSeen.Store(now)
-	s.perIP[ep.ip()]++
+	s.perIP[limitKey(ep.ip())]++
 	s.trackTCP(ep, sid)
 	return p
 }
@@ -468,16 +632,22 @@ func (s *Server) newParty(sid wire.SessionID, t wire.Token, ep endpoint, now int
 func (s *Server) trackTCP(ep endpoint, sid wire.SessionID) {
 	if ep.tcp != nil {
 		ep.tcp.sessions[sid] = struct{}{}
+		ep.tcp.nsess.Store(int32(len(ep.tcp.sessions)))
 	}
 }
 
 func (s *Server) untrackTCP(ep endpoint, sid wire.SessionID) {
 	if ep.tcp != nil {
 		delete(ep.tcp.sessions, sid)
+		if len(ep.tcp.sessions) == 0 && ep.tcp.nsess.Swap(0) != 0 {
+			ep.tcp.lastActive.Store(time.Now().UnixNano())
+		}
 	}
 }
 
+// decIP releases one party of the limit key ip; s.mu must be held.
 func (s *Server) decIP(ip netip.Addr) {
+	ip = limitKey(ip)
 	if s.perIP[ip] <= 1 {
 		delete(s.perIP, ip)
 	} else {
@@ -519,13 +689,26 @@ func (s *Server) echo(m wire.RelayControl, src endpoint) {
 	if delay > s.cfg.MaxEchoDelay {
 		delay = s.cfg.MaxEchoDelay
 	}
-	if s.echoes.Add(1) > 4096 {
-		s.echoes.Add(-1)
+	key := limitKey(src.ip())
+	s.echoMu.Lock()
+	if s.echoIP[key] >= s.cfg.MaxEchoesPerIP || s.echoes.Load() >= maxPendingEchoes {
+		s.echoMu.Unlock()
+		s.metrics.echoRejects.Add(1)
 		s.send(src, wire.AppendReject(nil, wire.SessionID{}, wire.RejectBusy))
 		return
 	}
+	s.echoIP[key]++
+	s.echoes.Add(1)
+	s.echoMu.Unlock()
 	time.AfterFunc(delay, func() {
-		defer s.echoes.Add(-1)
+		s.echoMu.Lock()
+		if s.echoIP[key] <= 1 {
+			delete(s.echoIP, key)
+		} else {
+			s.echoIP[key]--
+		}
+		s.echoes.Add(-1)
+		s.echoMu.Unlock()
 		s.send(src, wire.AppendEchoReply(nil, m.Nonce, src.addr()))
 	})
 }
@@ -560,8 +743,18 @@ func (s *Server) sweep() {
 			}
 		}
 	}
+	s.pressureOnLocked(time.Now().UnixNano())
 	s.mu.Unlock()
-	s.limiter.sweep(time.Now())
+	s.tcpMu.Lock()
+	conns := make([]*tcpConn, 0, len(s.tcpConns))
+	for c := range s.tcpConns {
+		conns = append(conns, c)
+	}
+	s.tcpMu.Unlock()
+	now := time.Now().UnixNano()
+	for _, c := range conns {
+		c.closeIfIdle(now)
+	}
 }
 
 // Status is a snapshot for the status endpoint.
@@ -617,55 +810,4 @@ func (tb *tokenBucket) allow(n int, now int64, kbps int) bool {
 	}
 	tb.tokens -= float64(n)
 	return true
-}
-
-// ipLimiter rate limits control traffic per source IP.
-type ipLimiter struct {
-	mu      sync.Mutex
-	rate    float64
-	burst   float64
-	buckets map[netip.Addr]*ipBucket
-}
-
-type ipBucket struct {
-	tokens float64
-	last   time.Time
-}
-
-func newIPLimiter(rate, burst float64) *ipLimiter {
-	return &ipLimiter{rate: rate, burst: burst, buckets: make(map[netip.Addr]*ipBucket)}
-}
-
-func (l *ipLimiter) allow(ip netip.Addr) bool {
-	now := time.Now()
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	b := l.buckets[ip]
-	if b == nil {
-		if len(l.buckets) > 200000 {
-			return false
-		}
-		b = &ipBucket{tokens: l.burst, last: now}
-		l.buckets[ip] = b
-	}
-	b.tokens += now.Sub(b.last).Seconds() * l.rate
-	if b.tokens > l.burst {
-		b.tokens = l.burst
-	}
-	b.last = now
-	if b.tokens < 1 {
-		return false
-	}
-	b.tokens--
-	return true
-}
-
-func (l *ipLimiter) sweep(now time.Time) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	for ip, b := range l.buckets {
-		if now.Sub(b.last) > time.Minute {
-			delete(l.buckets, ip)
-		}
-	}
 }

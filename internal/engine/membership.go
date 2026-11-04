@@ -96,7 +96,9 @@ func (e *Engine) AddMember(id network.ID, pk identity.PublicKey) error {
 }
 
 // RemoveMember removes a member from an owned network. The removed member
-// is told too, so it drops the tunnel.
+// is told too, so it drops the tunnel. The network's invite code stops
+// working, so the removed person cannot come back with it, and a friendship
+// that only the invite created ends.
 func (e *Engine) RemoveMember(id network.ID, pk identity.PublicKey) error {
 	e.mu.Lock()
 	l, err := e.ownedListLocked(id)
@@ -111,8 +113,13 @@ func (e *Engine) RemoveMember(id network.ID, pk identity.PublicKey) error {
 	}
 	removed := e.peers[pk]
 	e.commitListLocked(nl)
+	e.dropInviteLocked(id)
 	e.mu.Unlock()
+	go e.publishInvites()
 	e.pushList(nl, removed)
+	// The removed member keeps its session for a while, so that a lost list
+	// is sent again when its next Hello shows the old version.
+	time.AfterFunc(e.cfg.RemovalPruneDelay, e.pruneInviteFriends)
 	return nil
 }
 
@@ -237,6 +244,7 @@ func (e *Engine) acceptList(l *network.List, from *peer) error {
 		e.saveListsLocked()
 		e.log.Info("removed from network", "network", l.Name)
 		go e.publishNetworks()
+		go e.pruneInviteFriends()
 		return nil
 	}
 	e.log.Info("member list updated", "network", l.Name, "version", l.Version, "from", from.displayName())
@@ -321,6 +329,7 @@ func (e *Engine) LeaveNetwork(id network.ID) error {
 		go e.publishInvites()
 	}
 	go e.publishNetworks()
+	go e.pruneInviteFriends()
 	return e.saveListsLocked()
 }
 

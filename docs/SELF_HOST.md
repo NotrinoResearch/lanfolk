@@ -49,6 +49,9 @@ Copy `deploy/relay/.env.example` to `deploy/relay/.env` and edit it. The `.env` 
 | `RELAY_UDP_PORT` | `3478` | UDP port for STUN, signaling and data. |
 | `RELAY_TCP_PORT` | `443` | TCP fallback port. `0` turns the TCP fallback off. |
 | `RELAY_MAX_SESSION_KBPS` | `2000` | Per-session data rate limit in kbit/s (both directions share it). |
+| `RELAY_MAX_IP_KBPS` | `20000` | Relay data one source IP (IPv6: one /64) may send over all its sessions, in kbit/s. `0` turns the limit off. |
+| `RELAY_MAX_TOTAL_MBPS` | `400` | All relay data the relay forwards, in Mbit/s. Keep it below your server's bandwidth so the relay cannot crowd out other services on the same host. `0` turns the limit off. |
+| `RELAY_CHALLENGE` | `auto` | Register cookies (see [PROTOCOL.md](PROTOCOL.md) 4.3.1): `auto` asks for them only under pressure, `always` asks every new UDP registration (clients before 0.4 then cannot register over UDP), `off` never asks. |
 | `RELAY_METRICS_ADDR` | `127.0.0.1:9100` | Address of the health and metrics endpoint. `off` disables it (and the health check then always passes). |
 | `RELAY_IMAGE_TAG` | `latest` | Image tag that compose starts. |
 
@@ -60,6 +63,11 @@ The relay binary reads more variables. The compose file does not pass them on by
 | `RELAY_MAX_SESSIONS_PER_IP` | `600` | Parties (registered clients) allowed per source IP. |
 | `RELAY_MAX_SESSIONS` | `100000` | Sessions allowed in total. |
 | `RELAY_IDLE_TIMEOUT_SEC` | `120` | Seconds without a registration or data before a client is removed. |
+| `RELAY_MAX_TCP_CONNS` | `2048` | TCP fallback connections in total. Each costs about 50 KB of memory; raise the compose memory limit with it. |
+| `RELAY_TCP_GRACE_SEC` | `15` | Seconds a TCP connection without a session may stay silent before it is closed. |
+| `RELAY_MAX_ECHOES_PER_IP` | `8` | Pending delayed echoes (used by `natprobe`) per source IP. |
+| `RELAY_CHALLENGE_SESSIONS_PCT` | `50` | With `RELAY_CHALLENGE=auto`: ask for cookies while the session table is at least this full (percent of `RELAY_MAX_SESSIONS`). `0` disables this trigger. |
+| `RELAY_CHALLENGE_NEW_PER_SEC` | `1000` | With `RELAY_CHALLENGE=auto`: ask for cookies while more new sessions or parties than this are requested over UDP per second. `0` disables this trigger. |
 | `RELAY_LOG_LEVEL` | `info` | Set to `debug` for debug logging. |
 
 The container runs as a non-root user with a read-only root filesystem, all capabilities dropped except `NET_BIND_SERVICE`, a memory limit of 256 MB and a limit of 256 processes. See [DECISIONS.md](DECISIONS.md) (D-006) for why `no-new-privileges` is not set.
@@ -141,7 +149,7 @@ The endpoint on `RELAY_METRICS_ADDR` serves:
 | `/status` | JSON: uptime, sessions, parties, TCP connections, pending echoes |
 | `/metrics` | Prometheus text format, metrics named `lanfolk_relay_*` |
 
-Useful metrics: `lanfolk_relay_sessions`, `lanfolk_relay_parties`, `lanfolk_relay_tcp_connections`, `lanfolk_relay_forwarded_packets_total`, `lanfolk_relay_forwarded_bytes_total`, `lanfolk_relay_rejects_total`, and the `lanfolk_relay_dropped_*_total` counters (rate limits, unregistered sources, malformed packets, full TCP queues). Point a Prometheus scraper at the endpoint through an SSH tunnel or a local agent; do not expose it publicly.
+Useful metrics: `lanfolk_relay_sessions`, `lanfolk_relay_parties`, `lanfolk_relay_tcp_connections`, `lanfolk_relay_forwarded_packets_total`, `lanfolk_relay_forwarded_bytes_total`, `lanfolk_relay_rejects_total`, and the `lanfolk_relay_dropped_*_total` counters (rate limits, unregistered sources, malformed packets, full TCP queues, the per-IP and total data limits). `lanfolk_relay_under_pressure` is 1 while new UDP registrations need a cookie; `lanfolk_relay_challenges_total`, `lanfolk_relay_cookie_rejects_total`, `lanfolk_relay_tcp_rejects_total`, `lanfolk_relay_tcp_idle_closed_total` and `lanfolk_relay_echo_rejects_total` show the protections at work. A rising `dropped_ip_rate` or `under_pressure` without a matching rise in users is a sign of abuse. Point a Prometheus scraper at the endpoint through an SSH tunnel or a local agent; do not expose it publicly.
 
 Logs are JSON lines on standard output, rotated by Docker (3 files of 10 MB):
 
@@ -149,7 +157,7 @@ Logs are JSON lines on standard output, rotated by Docker (3 files of 10 MB):
 sudo docker logs --tail 100 -f lanfolk-relay
 ```
 
-The relay logs its start (addresses it listens on and the version) and a summary of counts every 5 minutes. It does not log client addresses or session IDs. `RELAY_LOG_LEVEL=debug` enables debug logging; use it only while diagnosing a problem.
+The relay logs its start (addresses it listens on, the version and its limits), a summary of counts every 5 minutes, and the start and end of every pressure period. It does not log client addresses or session IDs. `RELAY_LOG_LEVEL=debug` enables debug logging; use it only while diagnosing a problem.
 
 ## Upgrade
 

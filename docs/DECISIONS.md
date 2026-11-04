@@ -575,3 +575,58 @@ Date: 2026-11-04.
 - Hello carries the sender's release as an optional trailing field (since
   0.3.0; 0.2 ignores it), so the app can say "Older Lanfolk" on a member and
   suggest updating when a member is newer.
+
+## D-033 Members reach desktop programs, not Windows services
+
+Date: 2026-11-04.
+
+A security review found that the virtual LAN exposed more of a member's
+computer than a game needs, and that some local protections were weaker than
+intended. The fixes keep the promise "install, share a code, play": none of
+them adds a prompt, and none changes the wire protocol between clients.
+
+- **Service filter.** The firewall rule that lets members in for any program
+  stays (it is what makes games work without firewall prompts), but the
+  tunnel now drops inbound UDP and new TCP connections to a local port that
+  only session-0 processes own: Windows services and the System process
+  (HTTP.sys, SMB). Remote access tools, media and database servers that run
+  as services are therefore out of reach, while games and anything else the
+  user runs on the desktop stay reachable. The port owner table is rebuilt in
+  the background at most once a second while traffic arrives; the packet path
+  does an atomic load and a map lookup (about 8 ns). A port not in the table
+  is allowed, so a game that just opened a port never waits. Settings >
+  Troubleshooting has "Let members reach Windows services" for the rare game
+  server that runs as a service; the diagnostic report counts drops
+  (`DroppedService`).
+- **Denylist.** Added LLMNR, SSDP, the UPnP device host, WS-Discovery,
+  Windows Media sharing, RPC over HTTP and UDP remote desktop. These also stop
+  name resolution and discovery multicast from reaching other members. mDNS
+  (UDP 5353) is not on the list: a game that listens on it receives it, while
+  Windows' own mDNS responder, a service, does not (service filter).
+- **Data folder.** `C:\ProgramData\Lanfolk` inherited an ACL that let every
+  local user read it and create files in it. The service now gives it a
+  protected ACL (LocalSystem and Administrators only, owned by
+  Administrators) at install and at every start, removes links it must never
+  follow, and takes the folder over if someone else owns it. The app never
+  reads the folder directly, so nothing changes for users; reading the logs
+  needs administrator rights.
+- **Control pipe.** Interactive users can no longer create server instances
+  of the service's pipe; clients check that the pipe belongs to the service;
+  the service identifies clients by impersonation instead of by process ID
+  (PROTOCOL.md 11.1).
+- **Invites.** Removing a member also drops the network's invite code, and
+  friendships that only an invite created end when no network is shared any
+  more (PROTOCOL.md 10.3). The owner's "joined" notification says how to
+  remove an unexpected member.
+- **Diagnostic report.** Public IP addresses are shortened to their first
+  half, keys to key prefixes, and the friend code is left out, because users
+  attach the report to public issues. It now includes the tunnel counters.
+- **Relay.** The control rate limiter has a fixed size and can no longer be
+  filled by a flood of spoofed addresses; data is limited per IP and in
+  total; TCP connections are limited in total; silent TCP connections without
+  a session are closed; delayed echoes are limited per IP; IPv6 sources count
+  per /64; and while the relay is under pressure, a Register that would
+  create state must carry a cookie (PROTOCOL.md 4.3.1, 4.5). Clients before
+  0.4 ignore the cookie request, so they cannot open new UDP sessions while a
+  relay is under attack; their existing sessions and the TCP fallback keep
+  working.

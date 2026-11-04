@@ -29,7 +29,13 @@ func TestRelayLoad(t *testing.T) {
 	seconds := envInt("LANFOLK_LOADTEST_SECONDS", 10)
 	const rate, size = 64, 200
 	// All load clients share 127.0.0.1, so lift the per-IP control limit.
-	s := startServer(t, func(c *Config) { c.MaxSessionsPerIP = 2 * pairs; c.ControlPerIPRate = 1e6; c.UDPReaders = readers })
+	// The same goes for the per-IP data cap.
+	s := startServer(t, func(c *Config) {
+		c.MaxSessionsPerIP = 2 * pairs
+		c.ControlPerIPRate = 1e6
+		c.MaxIPKbps = 0
+		c.UDPReaders = readers
+	})
 	srv := s.UDPAddr()
 
 	type side struct {

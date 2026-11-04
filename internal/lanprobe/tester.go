@@ -46,7 +46,7 @@ const (
 
 // DefaultBlockedPorts are the Windows service ports that must not be
 // reachable through the Lanfolk adapter.
-var DefaultBlockedPorts = []int{135, 139, 445, 3389, 5985, 5986}
+var DefaultBlockedPorts = []int{135, 139, 445, 593, 2869, 3389, 5355, 5357, 5358, 5985, 5986, 10243}
 
 // Result is the outcome of one behavior test.
 type Result struct {
@@ -503,7 +503,7 @@ func privateRangeResult(peer netip.Addr) Result {
 
 // testBlockedPorts tries TCP connects to ports that must be unreachable.
 func testBlockedPorts(ctx context.Context, peer netip.Addr, ports []int, timeout time.Duration) Result {
-	r := Result{ID: IDBlockedPorts, Title: "Windows service ports blocked (135, 139, 445, 3389, 5985, 5986)", Core: true}
+	r := Result{ID: IDBlockedPorts, Title: "Windows service ports blocked (" + portsText(ports) + ")", Core: true}
 	if timeout > 2*time.Second {
 		timeout = 2 * time.Second
 	}
@@ -599,4 +599,13 @@ func MarkdownRow(label string, rs []Result) (header, row string) {
 	}
 	return "| " + strings.Join(cols, " | ") + " |\n| " + strings.Join(sep, " | ") + " |",
 		"| " + strings.Join(vals, " | ") + " |"
+}
+
+// portsText lists ports as "135, 139, 445".
+func portsText(ports []int) string {
+	s := make([]string, len(ports))
+	for i, p := range ports {
+		s[i] = fmt.Sprint(p)
+	}
+	return strings.Join(s, ", ")
 }

@@ -155,3 +155,35 @@ func TestMTUBudget(t *testing.T) {
 		}
 	}
 }
+
+func TestRegisterCookieAndChallenge(t *testing.T) {
+	s := sid(3)
+	tok := Token{9, 8, 7}
+	cookie := Cookie{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16}
+
+	m, err := ParseRelayControl(AppendRegister(nil, s, tok))
+	if err != nil || m.HasCookie {
+		t.Fatalf("plain register: %+v %v", m, err)
+	}
+	m, err = ParseRelayControl(AppendRegisterCookie(nil, s, tok, cookie))
+	if err != nil || m.Type != RelayRegister || m.Session != s || m.Token != tok || !m.HasCookie || m.Cookie != cookie {
+		t.Fatalf("register with cookie: %+v %v", m, err)
+	}
+	// A partial cookie is ignored, as an old relay ignores the whole tail.
+	m, err = ParseRelayControl(AppendRegisterCookie(nil, s, tok, cookie)[:3+24+5])
+	if err != nil || m.HasCookie {
+		t.Fatalf("partial cookie: %+v %v", m, err)
+	}
+	m, err = ParseRelayControl(AppendChallenge(nil, s, cookie))
+	if err != nil || m.Type != RelayChallenge || m.Session != s || m.Cookie != cookie {
+		t.Fatalf("challenge: %+v %v", m, err)
+	}
+	if _, err := ParseRelayControl(AppendChallenge(nil, s, cookie)[:3+16+15]); err == nil {
+		t.Fatal("truncated challenge accepted")
+	}
+	// Unregister never carries a cookie.
+	m, err = ParseRelayControl(append(AppendUnregister(nil, s, tok), cookie[:]...))
+	if err != nil || m.HasCookie {
+		t.Fatalf("unregister: %+v %v", m, err)
+	}
+}

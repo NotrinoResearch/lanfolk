@@ -20,7 +20,8 @@ Other facts that matter for compatibility:
 
 - **IPv4 only.** The virtual network has no IPv6. Lanfolk disables IPv6 on its adapter where Windows allows it.
 - **MTU 1380.** Games should work without change; this leaves room for the tunnel and for relay headers.
-- **System ports are blocked between members.** A network places members on the same LAN, so Lanfolk blocks TCP 135, 139, 445, 3389, 5985-5986 and UDP 137-138 to and from the virtual network. Everything else stays open because game ports cannot be known in advance.
+- **System ports are blocked between members.** A network places members on the same LAN, so Lanfolk blocks TCP 135, 139, 445, 593, 2869, 3389, 5355, 5357-5358, 5985-5986, 10243 and UDP 137-138, 1900, 3389, 3702, 5355 to and from the virtual network (file sharing, remote desktop, remote management, name resolution and device discovery).
+- **Windows services are out of reach.** Members reach the games and other programs you run on your desktop, on any port. Programs that run as Windows services (remote access, media or database servers) are not reachable through Lanfolk. If a game's dedicated server runs as a Windows service, turn on **Settings, Troubleshooting, Let members reach Windows services** (D-033).
 - **No default route.** Only `10.77.0.0/24` uses the adapter.
 - **One active network.** A user is active in one network at a time, so the adapter and the address range stay unambiguous.
 

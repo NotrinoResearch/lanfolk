@@ -50,6 +50,10 @@ type Config struct {
 	NewAdapter func(tun.Device) (Adapter, error)
 	// Blocked is the port denylist used inside the tunnel.
 	Blocked func(proto uint8, port uint16) bool
+	// ServicePort reports whether a local port is owned only by system
+	// services (see winnet.ServiceFilter). Members cannot reach such ports
+	// unless the user allows it in the settings. Nil allows every port.
+	ServicePort func(proto uint8, port uint16) bool
 	// Protector protects the identity seed; nil uses the platform default.
 	Protector identity.Protector
 	// DefaultRelays overrides the build-time default relay.
@@ -59,6 +63,10 @@ type Config struct {
 	StartCapture func(ctx context.Context, deliver func([]byte)) (stop func(), err error)
 	// InviteTTL overrides how long new invite codes are valid (tests).
 	InviteTTL time.Duration
+	// InviteFriendGrace and RemovalPruneDelay override the timing of the
+	// removal of invite-only friendships (tests; see pruneInviteFriends).
+	InviteFriendGrace time.Duration
+	RemovalPruneDelay time.Duration
 	// Test hooks.
 	LoopbackCandidates bool
 	DisablePortMapping bool
@@ -107,8 +115,9 @@ type Engine struct {
 	nick         string
 	settings     store.Settings
 	// Lock-free copies of settings read on the packet path.
-	relayOnlyA  atomic.Bool
-	manualPortA atomic.Int32
+	relayOnlyA     atomic.Bool
+	manualPortA    atomic.Int32
+	allowServicesA atomic.Bool
 
 	byKey   atomic.Pointer[map[identity.PublicKey]*peer]
 	bySID   atomic.Pointer[map[wire.SessionID]*peer]
@@ -156,6 +165,12 @@ func New(cfg Config) (*Engine, error) {
 	}
 	if cfg.DHTAfter <= 0 {
 		cfg.DHTAfter = 30 * time.Second
+	}
+	if cfg.InviteFriendGrace <= 0 {
+		cfg.InviteFriendGrace = 2 * time.Minute
+	}
+	if cfg.RemovalPruneDelay <= 0 {
+		cfg.RemovalPruneDelay = 90 * time.Second
 	}
 	if cfg.InviteTTL <= 0 {
 		cfg.InviteTTL = invite.TTL
@@ -511,6 +526,13 @@ func (e *Engine) rebuildAddrMap() {
 func (e *Engine) syncSettingsCopies() {
 	e.relayOnlyA.Store(e.settings.RelayOnly)
 	e.manualPortA.Store(int32(e.settings.ManualPort))
+	e.allowServicesA.Store(e.settings.AllowServices)
+}
+
+// servicePort is the tunnel's service filter: the platform's answer unless
+// the user lets members reach Windows services (troubleshooting setting).
+func (e *Engine) servicePort(proto uint8, port uint16) bool {
+	return !e.allowServicesA.Load() && e.cfg.ServicePort(proto, port)
 }
 
 func (e *Engine) relayOnly() bool { return e.relayOnlyA.Load() }

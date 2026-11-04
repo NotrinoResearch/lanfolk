@@ -733,8 +733,10 @@
           '</div>';
       case 'troubleshooting':
         return '<div class="card">' +
-          rowHTML('Diagnostic report', 'Connection details for a bug report. It contains no keys or passwords.',
+          rowHTML('Diagnostic report', 'Connection details for a bug report, without keys, passwords, friend codes or full IP addresses.',
             '<button type="button" class="btn" data-action="diagnostics">Save…</button>', 'dg') +
+          (s ? rowHTML('Let members reach Windows services', 'Members can always reach games and other programs you run. Programs that run as Windows services, such as remote access, media and database servers, stay out of reach. Turn this on only if a game server runs as a service.',
+            toggleHTML('allow_services', s.allow_services, 'Let members reach Windows services'), 'svcs') : '') +
           rowHTML('Service', esc('Version ' + st.version + ' · UDP port ' + st.listen_port + ' · DHT ' + F.dhtLabel(st.dht).split(' ')[0].toLowerCase()), '', 'svc') +
           '</div><h2 class="pane-sub">Use a connection code</h2>' +
           '<p class="pane-lead">When a friend cannot reach you at all (for example the relay is down), they can create a connection code for you from their member or friend menu. Paste it here; it works for a few minutes.</p>' +
@@ -982,7 +984,7 @@
         break;
       case 'remove-member': {
         var mem = memberOf(n, d.key);
-        confirmDialog({ title: 'Remove ' + (mem ? mem.nickname : 'member') + '?', text: 'They lose access to ' + (n ? n.name : 'the network') + ' right away. If they still have a valid invite code, make a new code so it stops working.', ok: 'Remove' })
+        confirmDialog({ title: 'Remove ' + (mem ? mem.nickname : 'member') + '?', text: 'They lose access to ' + (n ? n.name : 'the network') + ' right away. The current invite code stops working too; send a new one to anyone who has not joined yet.', ok: 'Remove' })
           .then(function (ok) { if (ok) call('RemoveMember', d.net, d.key).then(function () { S.detail = null; }, fail); });
         break;
       }

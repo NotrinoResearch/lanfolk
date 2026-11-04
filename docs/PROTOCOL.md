@@ -218,7 +218,7 @@ socket it uses for everything else.
 
 | Type | Name | Direction | Body |
 | --- | --- | --- | --- |
-| `0x01` | Register | client to relay | `session[16] \| token[8]` |
+| `0x01` | Register | client to relay | `session[16] \| token[8] \| [cookie[16]]` |
 | `0x02` | RegisterAck | relay to client | `session[16] \| peer_present[1] \| observed address` |
 | `0x04` | Ping | client to relay | `nonce[8]` |
 | `0x05` | Pong | relay to client | `nonce[8] \| observed address` |
@@ -227,8 +227,11 @@ socket it uses for everything else.
 | `0x08` | PeerJoined | relay to client | `session[16]` |
 | `0x09` | EchoRequest | client to relay | `nonce[8] \| delay_seconds[1]` |
 | `0x0A` | EchoReply | relay to client | `nonce[8] \| observed address` |
+| `0x0B` | Challenge | relay to client | `session[16] \| cookie[16]` |
 
-Type `0x03` is unused. "Observed address" uses the
+Type `0x03` is unused. The cookie of Register is optional: a client appends
+it only to answer a Challenge (section 4.3.1). Relays before release 0.4
+ignore it, as they ignore any bytes after a known body. "Observed address" uses the
 [address encoding](#address-encoding) and is the source address the relay saw
 on the frame it is answering (after unmapping IPv4-in-IPv6). `peer_present` is
 `1` if the other party of the session is registered, `0` otherwise.
@@ -285,6 +288,42 @@ On `Register(session, token)`:
    quarter of the idle timeout, 30 s by default**. Otherwise the relay
    answers `Reject(SessionFull)`.
 
+#### 4.3.1 Register cookie (under load)
+
+A Register over UDP proves nothing about its source address, so a flood of
+Registers with forged source addresses could fill the session table. While
+the relay is **under pressure**, a UDP Register that would create a new
+session (case 1) or a new party (cases 3 and 4) must carry a cookie:
+
+1. Without a valid cookie the relay creates no state and answers
+   `Challenge(session, cookie)`.
+2. The client repeats the Register at once with `cookie` appended (at most
+   once per session and second). It keeps sending the cookie with its
+   refreshes for 25 s.
+3. The relay accepts the cookie if it was made for the same source address
+   and port and the same session in the current or the previous 30-second
+   window, so a cookie is valid for 30 to 60 s.
+
+The cookie is the first 16 bytes of
+`SHA-256(secret[32] | address as 16 bytes (IPv4 mapped) | port[2] | session[16] | window[8])`,
+where `secret` is random per relay process and `window = floor(unix_seconds / 30)`.
+Only the relay ever checks it, so its construction is not part of the
+interoperability contract.
+
+A refresh or roaming of a known token (case 2) never needs a cookie, and
+neither does a Register over TCP: the TCP handshake has already proven the
+address. The relay is under pressure while the session table is at least
+`RELAY_CHALLENGE_SESSIONS_PCT` percent full (default 50) or more than
+`RELAY_CHALLENGE_NEW_PER_SEC` new sessions or parties are requested over UDP
+in one second (default 1000), and for 30 s after the last time either was
+true. `RELAY_CHALLENGE` can force the cookie on (`always`) or off (`off`).
+
+Clients before release 0.4 drop Challenge as an unknown message, so they
+cannot create new sessions over UDP while a relay is under pressure (existing
+registrations keep working, and the TCP fallback is not affected). This is
+intended: during an attack the relay keeps serving the clients that can prove
+their address.
+
 `Unregister(session, token)` removes the party only if the token **and** the
 source endpoint match. It is never answered. A session disappears when its
 last party is removed.
@@ -302,8 +341,8 @@ public UDP address without a separate STUN server.
 `EchoReply(nonce, observed)` to the same endpoint after `delay` seconds
 (0-255, capped by the relay, **180 s** by default). `natprobe` uses it to
 measure how long a NAT keeps a mapping open: if the reply arrives, the mapping
-survived `delay` seconds of silence. At most **4096** echoes are pending;
-beyond that the relay answers `Reject(Busy)`.
+survived `delay` seconds of silence. At most **4096** echoes are pending, and
+at most **8** per source IP; beyond that the relay answers `Reject(Busy)`.
 
 ### 4.4 TCP framing
 
@@ -329,16 +368,28 @@ with `TCP_NODELAY`.
 | Limit | Default | Setting |
 | --- | --- | --- |
 | Per-session data rate (both directions share one bucket, counts whole frames, burst of one second) | 2000 kbit/s | `RELAY_MAX_SESSION_KBPS` |
+| Relay data sent by one source IP over all its sessions (burst of one second, `0` = off) | 20000 kbit/s | `RELAY_MAX_IP_KBPS` |
+| All forwarded relay data (burst of one second, `0` = off) | 400 Mbit/s | `RELAY_MAX_TOTAL_MBPS` |
 | Parties per source IP | 600 | `RELAY_MAX_SESSIONS_PER_IP` |
 | Sessions in total | 100000 | `RELAY_MAX_SESSIONS` |
 | TCP connections per source IP | 16 (extra connections are closed at once) | none |
+| TCP connections in total | 2048 (extra connections are closed at once) | `RELAY_MAX_TCP_CONNS` |
+| TCP connection without a session, silent for | 15 s, then closed | `RELAY_TCP_GRACE_SEC` |
 | Idle timeout | 120 s | `RELAY_IDLE_TIMEOUT_SEC` |
 | Control and STUN messages per source IP | 200 per second, burst 600 | none |
 | Maximum delayed echo | 180 s | none |
-| Pending delayed echoes | 4096 | none |
+| Pending delayed echoes | 4096 in total, 8 per source IP | `RELAY_MAX_ECHOES_PER_IP` |
+| Register cookie (section 4.3.1) | under pressure only | `RELAY_CHALLENGE`, `RELAY_CHALLENGE_SESSIONS_PCT`, `RELAY_CHALLENGE_NEW_PER_SEC` |
 | Largest datagram | 1600 bytes | none |
 
-Relay data is not limited per IP, only per session.
+"Per source IP" means per IPv4 address and per IPv6 /64 prefix, because an
+IPv6 host usually controls a whole /64. The per-IP limits on control
+messages and relay data use a fixed table of buckets indexed by a keyed hash
+of the address: memory does not grow with the number of sources, and a flood
+from many addresses cannot lock out others. Two addresses that share a
+bucket share its budget. Relay data is checked against the per-IP limit
+first, then the session limit, then the total limit, so a flooding source
+does not use up the budget of others.
 
 ### 4.6 Client behavior (service)
 
@@ -947,9 +998,16 @@ otherwise. The invite session holds two parties, so a second simultaneous
 joiner is rejected with `SessionFull` and gets in once the first has left the
 session (a joiner leaves as soon as it is accepted). A client that exits
 cleanly unregisters its sessions; after a crash the relay keeps the old party
-until it has been silent for 30 s (section 4.3). A person who was removed from
-a network can join again with a valid code, so an owner who removes someone
-should also reset the invite.
+until it has been silent for 30 s (section 4.3).
+
+**Removal (service).** Removing a member drops the network's invite at once,
+so a removed person cannot come back with the code they used; the owner's next
+request creates a new code. A friendship that only an invite created (on
+either side) ends by itself once the two no longer share a network and no join
+between them is in progress. On the owner's side this happens 90 s after the
+removal, so that a lost member list still reaches the removed member. Friends
+added by hand are never removed this way; adding an invite friend by hand
+makes the friendship permanent.
 
 ### Address encoding
 
@@ -975,12 +1033,21 @@ machine.
 - Transport: the named pipe `\\.\pipe\lanfolk`. The environment variable
   `LANFOLK_PIPE` overrides the name for tests and side-by-side builds. (On
   other platforms the implementation uses a Unix socket for tests.)
-- The pipe's security descriptor is `D:P(A;;GA;;;SY)(A;;GA;;;BA)(A;;GRGW;;;IU)`:
-  full access for LocalSystem and Administrators, read and write for
-  interactive users.
-- In addition, the service checks the connecting process' user. Only the user
-  recorded at installation as the **pipe owner** may continue; anyone else gets one error message with code `unauthorized` and
-  the connection is closed.
+- The pipe's security descriptor is `D:P(A;;GA;;;SY)(A;;GA;;;BA)(A;;0x12019b;;;IU)`:
+  full access for LocalSystem and Administrators; interactive users may read
+  and write data and attributes (`0x12019b`) but not append, which on a pipe
+  means creating another server instance. A listener that does not run as
+  LocalSystem (tests, development) also grants full access to its own user.
+- A client opens the pipe with exactly that access and the identification
+  impersonation level. When it uses the default name it checks that the
+  pipe's owner is LocalSystem or Administrators, so a pipe of the same name
+  created by another user while the service was stopped is refused.
+- The service identifies the client by impersonating it after the first
+  request line has arrived (Windows allows this only after data was read),
+  not by process ID. Only the user recorded at installation as the **pipe
+  owner**, or an elevated administrator, may continue; anyone else gets one
+  error message with code `unauthorized` and the connection is closed. A
+  connection that sends no request within 30 s is closed.
 
 ### 11.2 Framing
 
@@ -1038,7 +1105,7 @@ those in `internal/ipc/api.go`; field names are the JSON names.
 | `invites.create` | `{network_id, reset?}` | `{code, expires}` | Owner gets the invite code of a network (the current one while valid; `reset: true` makes a new one) |
 | `invites.redeem` | `{code}` | `{network_id, owner_public_key, state}` | Start joining with an invite code (`state` is `waiting`, or the state of an identical join already in progress) |
 | `invites.list` | none | `[PendingJoin]` | Invite codes the user redeemed and their progress |
-| `invites.cancel` | `{network_id}` | none | Stop waiting for an invite (the owner stays a friend) |
+| `invites.cancel` | `{network_id}` | none | Stop waiting for an invite (an owner who became a friend only through the invite is removed again unless a network is shared) |
 
 For methods whose result or parameter type the Go declaration does not state
 (`identity.setNickname`'s result, `networks.*`'s result, `conncode.create`'s
@@ -1096,7 +1163,8 @@ the list for a day after they end. A UI shows `waiting` as "Waiting for
 `Settings`: `relay_only`, `compat_mode`, `manual_port` (0 = automatic),
 `port_mapping`, `dht_fallback`, `custom_relays` (`[Relay]`), `default_relay`
 (read-only), `notifications` and `check_updates` (desktop app preferences,
-both on by default).
+both on by default), `allow_services` (members may reach ports that only
+Windows services listen on; off by default, see D-033).
 
 ### 11.5 Events
 
@@ -1114,6 +1182,8 @@ both on by default).
 | --- | --- | --- |
 | 2026-11-04 | 1 | First complete specification: demultiplexing, identity and key derivation, shared relay (D-007), control frames, path selection, member relay, LanFrame, signed member list with relays (D-015), DHT record and connection code (D-010, D-013, D-014), local control protocol. |
 | 2026-11-04 | 1 | Invite codes (D-025): `lanfolk-i1` code, invite session and key derivation, control message types 8 and 9 (JoinRequest, JoinAccepted), IPC methods `invites.*` and event `invites`. A compatible addition: types 8 and 9 travel only in invite sessions, so clients that do not know them never see them. |
+| 2026-11-04 | 1 | Relay hardening (compatible): optional Register cookie and control type `0x0B` Challenge, sent only while the relay is under pressure (4.3.1); per-IP and total relay data limits, a total TCP connection limit, closing of silent TCP connections without a session, a per-IP limit on delayed echoes, per-/64 counting for IPv6 (4.5). |
+| 2026-11-04 | 1 | Local control hardening (D-033): pipe descriptor without instance creation for interactive users, client owner check, identification by impersonation after the first request, first-request timeout; setting `allow_services`. Clients and service are installed together, so an older client cannot open the new pipe. |
 
 Rules for changes: a change that old and new clients cannot both understand
 increases the protocol version announced in Hello and is described here before

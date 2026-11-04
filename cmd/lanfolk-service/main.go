@@ -20,6 +20,7 @@ import (
 
 	"github.com/NotrinoResearch/lanfolk/internal/engine"
 	"github.com/NotrinoResearch/lanfolk/internal/ipc"
+	"github.com/NotrinoResearch/lanfolk/internal/secdir"
 	"github.com/NotrinoResearch/lanfolk/internal/store"
 	"github.com/NotrinoResearch/lanfolk/internal/version"
 	"github.com/NotrinoResearch/lanfolk/internal/winnet"
@@ -145,7 +146,36 @@ func (r *rotatingFile) Write(p []byte) (int, error) {
 	return n, err
 }
 
+// prepareDataDir makes the data directory private to the service before
+// anything in it is read or written (see internal/secdir). It runs for the
+// installed service and for the platform default directory; a development
+// run with its own -data-dir is left alone. A failure is logged and the
+// service still starts: it must never be the reason a game night fails.
+func prepareDataDir(o options) (changes []string, err error) {
+	if !isService() && filepath.Clean(o.dataDir) != filepath.Clean(platformDataDir()) {
+		return nil, nil
+	}
+	return secdir.Harden(o.dataDir)
+}
+
+// newLogger prepares the data directory, opens the log and reports what the
+// preparation changed.
 func newLogger(o options, console bool) (*slog.Logger, error) {
+	changes, perr := prepareDataDir(o)
+	log, err := openLogger(o, console)
+	if err != nil {
+		return nil, err
+	}
+	for _, c := range changes {
+		log.Warn("data folder repaired", "change", c)
+	}
+	if perr != nil {
+		log.Error("could not make the data folder private", "dir", o.dataDir, "err", perr)
+	}
+	return log, nil
+}
+
+func openLogger(o options, console bool) (*slog.Logger, error) {
 	lf, err := openLog(filepath.Join(o.dataDir, "logs"))
 	if err != nil {
 		return nil, err
@@ -184,6 +214,10 @@ func serve(ctx context.Context, o options, log *slog.Logger) error {
 		cfg.NewTUN = createTUN
 		cfg.NewAdapter = func(dev tunDevice) (engine.Adapter, error) { return winnet.NewAdapter(dev) }
 		cfg.StartCapture = startCapture
+		// Members reach desktop programs (games), not Windows services.
+		if f := winnet.NewServiceFilter(); f != nil {
+			cfg.ServicePort = f.ServicePort
+		}
 	}
 	e, err := engine.New(cfg)
 	if err != nil {
