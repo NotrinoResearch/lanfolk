@@ -32,10 +32,15 @@ Last updated: 4 November 2026.
 
 ## Release 0.3.0
 
-- [ ] Repeat the two-home test from 4 November (0.2.1) with 0.3.0 on both
+- [x] Repeat the two-home test from 4 November (0.2.1) with 0.3.0 on both
       sides: the log should show one `path selected` line per real change,
       not one every 50 ms (D-030), and renamed members should show their new
-      name.
+      name. Result (4 November, 15:35-15:38): two `path selected` lines at
+      start (relay, then direct after 50 ms) and none after, also while the
+      friend turned a VPN off; direct 25 ms, jitter 1.7 ms, no loss,
+      quality good (with the VPN on: 139 ms, the path was still right). The
+      member list shows the new nickname. A longer session is still worth
+      doing.
 - [ ] Check that Windows shows the notifications (a member coming online, an
       update) on a machine with Focus Assist off and that a full-screen game
       holds them back.
