@@ -44,6 +44,8 @@ func TestRoundTrips(t *testing.T) {
 		&PathProbeAck{ProbeID: 99, PathID: 3, Observed: netip.MustParseAddrPort("198.51.100.2:5555")},
 		&RelayOffer{Entries: []OfferEntry{{Peer: identity.KeyID{1, 2}, RTT: 12 * time.Millisecond}}},
 		&Bye{},
+		&JoinRequest{Network: nid, Joiner: identity.PublicKey{7, 8}, Timestamp: 1_800_000_000, Nickname: "Mehmet", Signature: [64]byte{1, 2, 3}},
+		&JoinAccepted{Network: nid, OwnerNickname: "Ahmet", NetworkName: "Friday games", Signature: [64]byte{9, 8, 7}},
 	}
 	for _, m := range msgs {
 		got := roundTrip(t, m)
@@ -135,5 +137,29 @@ func TestReassemblerRejectsInconsistentTotals(t *testing.T) {
 	}
 	if r.Add(&MembershipUpdate{MsgID: 2, Index: 5, Total: 2, Data: []byte("b")}, now) != nil {
 		t.Fatal("index beyond total accepted")
+	}
+}
+
+func TestJoinMessageLimits(t *testing.T) {
+	long := string(bytes.Repeat([]byte("x"), 200))
+	r := roundTrip(t, &JoinRequest{Nickname: long}).(*JoinRequest)
+	if len(r.Nickname) != network.MaxNicknameLen {
+		t.Fatalf("nickname %d", len(r.Nickname))
+	}
+	a := roundTrip(t, &JoinAccepted{OwnerNickname: long, NetworkName: long}).(*JoinAccepted)
+	if len(a.OwnerNickname) != network.MaxNicknameLen || len(a.NetworkName) != network.MaxNameLen {
+		t.Fatalf("accepted limits: %d %d", len(a.OwnerNickname), len(a.NetworkName))
+	}
+	// A truncated body is invalid, and so is text that is too long on the wire.
+	b := Marshal(Header{}, &JoinRequest{Nickname: "a"})
+	for n := HeaderLen; n < len(b); n++ {
+		if _, _, err := Unmarshal(b[:n]); err == nil {
+			t.Fatalf("join request truncated to %d bytes accepted", n)
+		}
+	}
+	bad := Marshal(Header{}, &JoinAccepted{})
+	bad = append(bad[:HeaderLen+16], append([]byte{200}, bytes.Repeat([]byte("y"), 200)...)...)
+	if _, _, err := Unmarshal(bad); err == nil {
+		t.Fatal("over-long owner nickname accepted")
 	}
 }
