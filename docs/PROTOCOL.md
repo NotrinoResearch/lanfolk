@@ -428,7 +428,8 @@ Limits: `MaxCandidates` 16, `MaxOfferEntries` 90, `MaxNetRefs` 32,
 
 ```
 protocol_version[1] | flags[1] | nickname (len[1] + UTF-8, <= 32) |
-capabilities[4] | active_network[16] | ref_count[1] | ref_count * (network_id[16] | version[8])
+capabilities[4] | active_network[16] | ref_count[1] | ref_count * (network_id[16] | version[8]) |
+[app_version (len[1] + UTF-8, <= 32)]
 ```
 
 - `protocol_version` is 1.
@@ -446,6 +447,11 @@ capabilities[4] | active_network[16] | ref_count[1] | ref_count * (network_id[16
   that network with its own version (0 when unknown), which asks the sender
   for its list. A brand-new network is accepted only when its owner is an
   active friend and the receiver is a member.
+- `app_version` (since release 0.3.0, optional) is the sender's Lanfolk
+  release, for example `0.3.0`, so members can see who should update.
+  Receivers ignore bytes after the fields they know, so a 0.2 release reads
+  a Hello with this field and a 0.3 release reads one without it (version
+  unknown, older than 0.3.0).
 
 Sent every **25 s** (service). A peer is
 **online** while a Hello or any other authenticated frame from it arrived in
@@ -1076,7 +1082,8 @@ the parameter and result structs and is authoritative for the field names.
 `Peer`: `public_key`, `nickname`, `virtual_ip`, `online`, `path` (`direct`,
 `member-relay`, `shared-relay`, `tcp-fallback` or `none`), `relay_detail`
 (relaying member's nickname or the relay name), `ping_ms`, `avg_ping_ms`,
-`jitter_ms`, `loss_pct`, `quality` (`good`, `fair`, `poor` or `unknown`).
+`jitter_ms`, `loss_pct`, `quality` (`good`, `fair`, `poor` or `unknown`),
+`version` (the member's Lanfolk release from its Hello; empty if unknown).
 
 `PendingJoin`: `network_id`, `network_name` (optional, known once the owner
 accepted), `owner_public_key`, `owner_nickname` (optional), `state`
@@ -1088,7 +1095,8 @@ the list for a day after they end. A UI shows `waiting` as "Waiting for
 
 `Settings`: `relay_only`, `compat_mode`, `manual_port` (0 = automatic),
 `port_mapping`, `dht_fallback`, `custom_relays` (`[Relay]`), `default_relay`
-(read-only).
+(read-only), `notifications` and `check_updates` (desktop app preferences,
+both on by default).
 
 ### 11.5 Events
 

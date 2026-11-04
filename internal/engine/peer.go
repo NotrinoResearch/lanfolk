@@ -12,6 +12,7 @@ import (
 	"github.com/NotrinoResearch/lanfolk/internal/peermsg"
 	"github.com/NotrinoResearch/lanfolk/internal/store"
 	"github.com/NotrinoResearch/lanfolk/internal/transport"
+	"github.com/NotrinoResearch/lanfolk/internal/version"
 	"github.com/NotrinoResearch/lanfolk/internal/wire"
 	"golang.zx2c4.com/wireguard/replay"
 )
@@ -45,6 +46,8 @@ type peer struct {
 	vip       netip.Addr
 	vipp      atomic.Pointer[netip.Addr] // lock-free copy of vip for the LAN layer
 	listNick  string
+	// appVersion is the peer's Lanfolk release from its last Hello.
+	appVersion string
 
 	mu           sync.Mutex
 	nick         string
@@ -424,7 +427,8 @@ func (e *Engine) onControlFrom(p *peer, b []byte, v via) {
 func (e *Engine) helloFor(p *peer) *peermsg.Hello {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	h := &peermsg.Hello{ProtocolVersion: protocolVersion, Nickname: e.nick, Capabilities: peermsg.CapLanFrame}
+	h := &peermsg.Hello{ProtocolVersion: protocolVersion, Nickname: e.nick, Capabilities: peermsg.CapLanFrame,
+		AppVersion: version.Version}
 	if p.isFriend {
 		h.Flags |= peermsg.FlagFriend
 	}
@@ -469,6 +473,7 @@ func (e *Engine) onHello(p *peer, m *peermsg.Hello) {
 	p.helloRecv = now
 	renamed := p.nick != m.Nickname
 	p.nick = m.Nickname
+	p.appVersion = m.AppVersion
 	p.remoteActive = m.ActiveNetwork
 	p.remoteFlags = m.Flags
 	p.mu.Unlock()

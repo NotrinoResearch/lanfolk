@@ -35,6 +35,8 @@ func TestRoundTrips(t *testing.T) {
 	msgs := []Message{
 		&Hello{ProtocolVersion: 1, Flags: FlagRelayOnly, Nickname: "Mehmet", Capabilities: CapMemberRelay,
 			ActiveNetwork: nid, Networks: []NetRef{{ID: nid, Version: 7}}},
+		&Hello{ProtocolVersion: 1, Nickname: "Ahmet", ActiveNetwork: nid, Networks: []NetRef{{ID: nid, Version: 7}},
+			AppVersion: "0.3.0"},
 		&MembershipUpdate{MsgID: 9, Index: 1, Total: 3, Data: []byte("chunk")},
 		&Candidates{Gen: 4, Addrs: []Candidate{
 			{Source: 3, Addr: netip.MustParseAddrPort("203.0.113.5:4444")},
@@ -161,5 +163,43 @@ func TestJoinMessageLimits(t *testing.T) {
 	bad = append(bad[:HeaderLen+16], append([]byte{200}, bytes.Repeat([]byte("y"), 200)...)...)
 	if _, _, err := Unmarshal(bad); err == nil {
 		t.Fatal("over-long owner nickname accepted")
+	}
+}
+
+// Releases before 0.3.0 send no AppVersion and parse a Hello by reading its
+// known fields only; both directions must keep working.
+func TestHelloAppVersionIsCompatible(t *testing.T) {
+	var nid network.ID
+	nid[3] = 9
+	old := &Hello{ProtocolVersion: 1, Nickname: "Veli", ActiveNetwork: nid, Networks: []NetRef{{ID: nid, Version: 2}}}
+	got := roundTrip(t, old).(*Hello)
+	if got.AppVersion != "" || got.Nickname != "Veli" {
+		t.Fatalf("old Hello parsed as %+v", got)
+	}
+	// An old parser (the 0.2 field list, ignoring what follows) still reads
+	// a new Hello correctly.
+	b := Marshal(Header{}, &Hello{ProtocolVersion: 1, Nickname: "Veli", ActiveNetwork: nid,
+		Networks: []NetRef{{ID: nid, Version: 2}}, AppVersion: "0.3.0"})
+	r := &reader{b: b[HeaderLen:]}
+	r.u8()
+	r.u8()
+	if nick := r.str(64); nick != "Veli" {
+		t.Fatalf("nickname %q", nick)
+	}
+	r.u32()
+	r.take(16)
+	if n := r.u8(); n != 1 {
+		t.Fatalf("refs %d", n)
+	}
+	r.take(16)
+	if v := r.u64(); v != 2 || r.err != nil {
+		t.Fatalf("version %d err %v", v, r.err)
+	}
+	// Too long a version is rejected.
+	long := Marshal(Header{}, &Hello{})
+	long = append(long, 200)
+	long = append(long, bytes.Repeat([]byte("1"), 200)...)
+	if _, _, err := Unmarshal(long); err == nil {
+		t.Fatal("oversized version accepted")
 	}
 }

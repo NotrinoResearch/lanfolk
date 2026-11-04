@@ -228,8 +228,12 @@ func (e *Engine) Peers() []ipc.Peer {
 		if v := p.vipp.Load(); v != nil {
 			vip = *v
 		}
+		p.mu.Lock()
+		appVersion := p.appVersion
+		p.mu.Unlock()
 		ip := ipc.Peer{PublicKey: p.key.Hex(), Nickname: p.displayName(), VirtualIP: vip.String(),
-			Online: p.online(now, e.cfg.OfflineAfter), Path: "none", Quality: pathmgr.QualityUnknown.String()}
+			Online: p.online(now, e.cfg.OfflineAfter), Path: "none", Quality: pathmgr.QualityUnknown.String(),
+			Version: appVersion}
 		// An offline member keeps an optimistic relay path for its first
 		// packets; do not report it as a connection.
 		if v := p.active.Load(); v != nil && ip.Online {
@@ -256,6 +260,10 @@ func (e *Engine) Peers() []ipc.Peer {
 	return out
 }
 
+// adapterWarningPrefix starts the adapter warning; the desktop app shows the
+// adapter error in its own banner and skips this one.
+const adapterWarningPrefix = "The virtual network adapter is not available: "
+
 // Status describes the engine for the UI.
 func (e *Engine) Status() ipc.Status {
 	e.mu.Lock()
@@ -274,7 +282,7 @@ func (e *Engine) Status() ipc.Status {
 		st.Relays = append(st.Relays, rs)
 	}
 	if len(e.relays) == 0 {
-		st.Warnings = append(st.Warnings, "no relay is configured; add one in Settings")
+		st.Warnings = append(st.Warnings, "No relay server is set up, so only friends with a direct connection can reach you. Add one in Settings, Relays.")
 	}
 	pm := e.portmap
 	dhtEnabled := e.settings.DHTFallback
@@ -289,7 +297,7 @@ func (e *Engine) Status() ipc.Status {
 		st.DHT = e.dht.state(dhtEnabled)
 	}
 	if runtime.GOOS == "windows" && st.AdapterError != "" {
-		st.Warnings = append(st.Warnings, "the virtual adapter is not available: "+st.AdapterError)
+		st.Warnings = append(st.Warnings, adapterWarningPrefix+st.AdapterError)
 	}
 	return st
 }
@@ -299,7 +307,8 @@ func (e *Engine) Settings() ipc.Settings {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	s := ipc.Settings{RelayOnly: e.settings.RelayOnly, CompatMode: e.settings.CompatMode, ManualPort: e.settings.ManualPort,
-		PortMapping: e.settings.PortMapping, DHTFallback: e.settings.DHTFallback}
+		PortMapping: e.settings.PortMapping, DHTFallback: e.settings.DHTFallback,
+		Notifications: !e.settings.NotificationsOff, CheckUpdates: !e.settings.UpdateCheckOff}
 	for _, r := range e.settings.CustomRelays {
 		s.CustomRelays = append(s.CustomRelays, ipc.Relay{Host: r.Host, UDPPort: r.UDPPort, TCPPort: r.TCPPort})
 	}
@@ -332,6 +341,7 @@ func (e *Engine) SetSettings(s ipc.Settings) (ipc.Settings, error) {
 	err := e.store.Update(func(d *store.Data) error {
 		d.Settings.RelayOnly, d.Settings.CompatMode, d.Settings.ManualPort = s.RelayOnly, s.CompatMode, s.ManualPort
 		d.Settings.PortMapping, d.Settings.DHTFallback, d.Settings.CustomRelays = s.PortMapping, s.DHTFallback, relays
+		d.Settings.NotificationsOff, d.Settings.UpdateCheckOff = !s.Notifications, !s.CheckUpdates
 		return nil
 	})
 	if err != nil {

@@ -40,7 +40,8 @@ const usageText = `usage: lanfolk-cli [-json] [-pipe PATH] <command> [arguments]
   peers [-watch]                       live connection data per member
   settings                             show settings
   settings set key=value ...           relay_only, compat_mode, manual_port,
-                                       port_mapping, dht_fallback (true/false)
+                                       port_mapping, dht_fallback,
+                                       notifications, check_updates (true/false)
   settings relays [host:udp[:tcp] ...] set your custom relays
   conncode create <friend|member>      create a 10-minute connection code
   conncode use <code>                  use a code someone sent you
@@ -500,6 +501,10 @@ func settings(ctx context.Context, c *ipc.Client, a []string) error {
 				s.PortMapping = b
 			case "dht_fallback":
 				s.DHTFallback = b
+			case "notifications":
+				s.Notifications = b
+			case "check_updates":
+				s.CheckUpdates = b
 			case "manual_port":
 				n, err := strconv.Atoi(v)
 				if err != nil {

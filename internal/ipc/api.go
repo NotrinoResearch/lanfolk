@@ -144,6 +144,9 @@ type Peer struct {
 	JitterMs    float64 `json:"jitter_ms"`
 	LossPct     float64 `json:"loss_pct"`
 	Quality     string  `json:"quality"` // "good", "fair", "poor" or "unknown"
+	// Version is the member's Lanfolk release from its Hello; empty for
+	// releases before 0.3.0 and before the first Hello.
+	Version string `json:"version"`
 }
 
 // Pending join states.
@@ -174,6 +177,9 @@ type Settings struct {
 	DHTFallback  bool    `json:"dht_fallback"`
 	CustomRelays []Relay `json:"custom_relays"`
 	DefaultRelay string  `json:"default_relay"` // read-only
+	// Desktop app: Windows notifications and the daily update check.
+	Notifications bool `json:"notifications"`
+	CheckUpdates  bool `json:"check_updates"`
 }
 
 // Parameter and result types.

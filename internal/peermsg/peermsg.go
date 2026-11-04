@@ -39,6 +39,7 @@ const (
 	MaxCandidates   = 16
 	MaxOfferEntries = 90
 	MaxNetRefs      = 32
+	MaxAppVersion   = 32
 	FragmentSize    = 1100
 )
 
@@ -81,6 +82,10 @@ type Hello struct {
 	Capabilities    uint32
 	ActiveNetwork   network.ID
 	Networks        []NetRef
+	// AppVersion is the sender's Lanfolk release ("0.3.0"), so members can
+	// tell who should update. It is the last field: releases before 0.3.0
+	// ignore trailing bytes and do not send it.
+	AppVersion string
 }
 
 // MembershipUpdate carries one fragment of a signed member list.
@@ -286,6 +291,9 @@ func (m *Hello) appendBody(b []byte) []byte {
 		b = append(b, n.ID[:]...)
 		b = binary.BigEndian.AppendUint64(b, n.Version)
 	}
+	if m.AppVersion != "" {
+		b = appendStr(b, m.AppVersion, MaxAppVersion)
+	}
 	return b
 }
 
@@ -306,6 +314,10 @@ func (m *Hello) parseBody(p []byte) error {
 		copy(ref.ID[:], r.take(16))
 		ref.Version = r.u64()
 		m.Networks = append(m.Networks, ref)
+	}
+	m.AppVersion = ""
+	if r.err == nil && len(r.b) > 0 {
+		m.AppVersion = r.str(MaxAppVersion)
 	}
 	return r.err
 }

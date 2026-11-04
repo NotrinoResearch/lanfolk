@@ -111,6 +111,10 @@ type Settings struct {
 	PortMapping  bool    `json:"port_mapping"`
 	DHTFallback  bool    `json:"dht_fallback"`
 	ListenPort   int     `json:"listen_port"` // last automatic port, reused across restarts
+	// Desktop app preferences, stored negated so that files written before
+	// they existed keep the default (on).
+	NotificationsOff bool `json:"notifications_off,omitempty"`
+	UpdateCheckOff   bool `json:"update_check_off,omitempty"`
 }
 
 // Data is the whole file.
