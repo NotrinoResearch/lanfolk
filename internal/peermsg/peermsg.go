@@ -34,7 +34,7 @@ const (
 	MaxPlaintext    = 1200
 	HeaderLen       = 17
 	MaxCandidates   = 16
-	MaxOfferEntries = 100
+	MaxOfferEntries = 90
 	MaxNetRefs      = 32
 	FragmentSize    = 1100
 )
