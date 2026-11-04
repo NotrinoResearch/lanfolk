@@ -42,6 +42,9 @@ const (
 // Hello flags and capabilities.
 const (
 	FlagRelayOnly uint8 = 1 << 0
+	// FlagFriend means the sender has added the receiver as a friend. A
+	// friendship becomes active only when both sides set it.
+	FlagFriend uint8 = 1 << 1
 
 	CapMemberRelay uint32 = 1 << 0 // willing to relay for other members
 	CapLanFrame    uint32 = 1 << 1 // understands broadcast/multicast LanFrames
