@@ -87,6 +87,9 @@ func config() (relay.Config, error) {
 	if cfg.MaxSessions, err = envInt("RELAY_MAX_SESSIONS", cfg.MaxSessions); err != nil {
 		return cfg, err
 	}
+	if cfg.UDPReaders, err = envInt("RELAY_UDP_READERS", 1); err != nil {
+		return cfg, err
+	}
 	idle, err := envInt("RELAY_IDLE_TIMEOUT_SEC", int(cfg.IdleTimeout/time.Second))
 	if err != nil {
 		return cfg, err

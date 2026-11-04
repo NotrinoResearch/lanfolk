@@ -32,6 +32,7 @@ type Config struct {
 	SweepInterval    time.Duration
 	ControlPerIPRate float64 // control messages per second per source IP
 	MaxEchoDelay     time.Duration
+	UDPReaders       int // goroutines reading the UDP socket (default 1)
 	Logger           *slog.Logger
 }
 
@@ -154,8 +155,10 @@ func New(cfg Config) (*Server, error) {
 	if s.udp, err = net.ListenUDP("udp", ua); err != nil {
 		return nil, fmt.Errorf("listen udp: %w", err)
 	}
-	s.udp.SetReadBuffer(4 << 20)
-	s.udp.SetWriteBuffer(4 << 20)
+	// About 30 ms of traffic at full load: under overload the kernel drops
+	// packets instead of queueing them for hundreds of milliseconds.
+	s.udp.SetReadBuffer(1 << 20)
+	s.udp.SetWriteBuffer(1 << 20)
 	if cfg.TCPAddr != "" {
 		if s.tcpLn, err = net.Listen("tcp", cfg.TCPAddr); err != nil {
 			s.udp.Close()
@@ -196,8 +199,18 @@ func (s *Server) MetricsAddr() net.Addr {
 // Serve processes traffic until ctx is cancelled.
 func (s *Server) Serve(ctx context.Context) error {
 	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() { defer wg.Done(); s.udpLoop() }()
+	// Optional extra readers on the same socket (RELAY_UDP_READERS). More
+	// than one can reorder packets of a flow slightly; WireGuard's replay
+	// window and game protocols tolerate that. One reader is the default
+	// until measurements on the deployment host show a gain.
+	readers := s.cfg.UDPReaders
+	if readers <= 0 {
+		readers = 1
+	}
+	for i := 0; i < readers; i++ {
+		wg.Add(1)
+		go func() { defer wg.Done(); s.udpLoop() }()
+	}
 	if s.tcpLn != nil {
 		wg.Add(1)
 		go func() { defer wg.Done(); s.acceptLoop() }()
