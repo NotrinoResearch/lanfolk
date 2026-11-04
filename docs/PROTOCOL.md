@@ -41,11 +41,10 @@ Every protocol change must update this file and add an entry to the
   accepts is **1600 bytes** (`wire.MaxPacket`). Longer datagrams are dropped.
 - The virtual network is `10.77.0.0/24`, the virtual MTU is **1380**, and the
   adapter is named `Lanfolk`.
-- Some behavior below is specified here but implemented in the service rather
-  than in a reusable package. Those parts are marked **(service)**. The
-  numbers come from the design (see [DECISIONS.md](DECISIONS.md)) and may
-  still be tuned by measurements. Constants that are configurable in code are
-  given with their defaults.
+- Parts marked **(service)** are implemented in `internal/engine` rather
+  than in a reusable package. The numbers come from the design (see
+  [DECISIONS.md](DECISIONS.md)) and may still be tuned by measurements.
+  Constants that are configurable in code are given with their defaults.
 
 ## 2. Overview and single-socket demultiplexing
 
@@ -388,14 +387,16 @@ boot[8] | counter[8] | type[1] | body
 ### 5.2 Replay protection (service)
 
 - `boot` is chosen when the sender starts and must be larger than the value of
-  every earlier run (for example, derived from the clock). `counter` starts at 0 for each boot
-  and increases by 1 for each frame the sender emits, on all carriers together.
+  every earlier run: the engine uses the Unix time in nanoseconds with the low
+  16 bits replaced by random bits. `counter` is 1 for the first frame of a boot
+  and increases by 1 for each frame the sender emits to that peer, on all
+  carriers together. Counters of 2^62 or more are rejected.
 - The receiver keeps, per peer, the highest `boot` seen and the time of the last
   accepted frame. It accepts a **new boot value only if it is larger than the
   last one, or the last accepted frame is older than 30 s**. (The second rule
   lets a peer recover after losing its state or after a clock reset.)
-- For the current boot it uses a **sliding window of 2048 counters** (the same
-  replay filter as wireguard-go). A counter outside the window or already seen
+- For the current boot it uses a **sliding window of 8128 counters** (the
+  replay filter of wireguard-go, RFC 6479). A counter outside the window or already seen
   is dropped.
 - A frame that fails authentication is dropped silently.
 
@@ -427,12 +428,19 @@ capabilities[4] | active_network[16] | ref_count[1] | ref_count * (network_id[16
 
 - `protocol_version` is 1.
 - `flags` bit 0: **relay only**, the sender will not use direct paths.
+  Bit 1: **friend**, the sender has added the receiver as a friend. A
+  friendship becomes active only after a Hello with this bit arrives, so a
+  co-member who never added you cannot activate it.
 - `capabilities` bit 0: willing to relay for other members (member relay).
   Bit 1: understands LanFrames. Other bits are reserved and must be ignored.
 - `active_network` is the sender's active network, or 16 zero bytes.
-- The list names networks the sender holds and the member list version it has
-  of each (at most 32). A receiver that holds a newer version of a network
-  both sides know sends a MembershipUpdate.
+- The list names the networks the sender holds that include the receiver,
+  with the member list version it has of each (at most 32). A receiver that
+  holds a newer version sends a MembershipUpdate. A receiver that holds an
+  older version, or does not know the network, answers with a Hello that lists
+  that network with its own version (0 when unknown), which asks the sender
+  for its list. A brand-new network is accepted only when its owner is an
+  active friend and the receiver is a member.
 
 Sent every **25 s** (service). A peer is
 **online** while a Hello or any other authenticated frame from it arrived in
