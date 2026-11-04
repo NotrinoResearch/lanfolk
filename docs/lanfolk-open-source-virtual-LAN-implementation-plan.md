@@ -382,9 +382,12 @@ Read this file to connect to the VPS and deploy the relay. Use `ip` as `RELAY_PU
 
 - [x] Set up the Go module, CI and repository layout
   - *Deviation (D-002):* CI workflows exist but run only on manual dispatch. Builds and tests run locally with Go 1.27.3, MinGW-w64 GCC (for `go test -race`) and Docker.
-- [ ] Build `natprobe`: external port behavior, filtering, NAT timeout, IPv6 and DHT access
-- [ ] Build `lanprobe`: unicast, subnet broadcast, global broadcast and multicast
+- [x] Build `natprobe`: external port behavior, filtering, NAT timeout, IPv6 and DHT access
+  - *Deviation (D-018):* filtering behavior is not measured, because the relay answers from a single address.
+- [x] Build `lanprobe`: unicast, subnet broadcast, global broadcast and multicast
+  - It also checks IP in payload, the private range and the blocked SMB/RDP ports, and `lanprobe latency -compare` measures tunnel overhead. Verified on one machine; the two-machine run waits for the client.
 - [ ] Test broadcast and multicast send and receive through Wintun
+  - `lanprobe wintun-selftest` is ready. It needs an elevated shell and `wintun.dll`, so it has not run yet.
 - [ ] Verify plain WireGuard traffic can pass through test lines
 - [ ] `[Human]` Run `natprobe` on Türk Telekom, Superonline, TurkNet, Vodafone and mobile lines
 
@@ -444,6 +447,7 @@ Read this file to connect to the VPS and deploy the relay. Use `ip` as `RELAY_PU
 - [ ] Demultiplex packet types on one UDP socket
 - [ ] Implement probes and the path selection state machine
 - [ ] Add IPv6, UPnP, NAT-PMP and PCP support
+  - UPnP, NAT-PMP and PCP are implemented and tested against fake gateways in `internal/portmap`. IPv6 candidates and service integration are pending.
 - [ ] Add manual port settings
 - [ ] Handle reconnection after path loss and IP changes
 
@@ -464,8 +468,12 @@ Read this file to connect to the VPS and deploy the relay. Use `ip` as `RELAY_PU
 
 - [ ] Implement the member relay protocol and rate limits
 - [ ] Select relays by total RTT
-- [ ] Implement BEP 44 publish and lookup
-- [ ] Implement time-limited connection codes
+- [x] Implement BEP 44 publish and lookup
+  - Implemented in `internal/discovery` and tested on a local DHT network; service integration is pending.
+  - *Deviation (D-013):* the DHT runs only while no relay is reachable, as a passive client.
+  - *Deviation (D-014):* salt and keys rotate every UTC day.
+- [x] Implement time-limited connection codes
+  - Implemented and tested in `internal/discovery`; service integration is pending.
 - [ ] Test the relay-down scenario
 
 **Gate:** With the shared relay down, a suitable member and DHT can establish a connection.
@@ -476,7 +484,10 @@ Read this file to connect to the VPS and deploy the relay. Use `ip` as `RELAY_PU
 - [ ] Write incoming packets to the adapter
 - [ ] Implement compatibility mode and metric restoration
 - [ ] Configure Private profile and firewall rule for the adapter
+  - Implemented in `internal/winnet` and unit tested. It needs an elevated run on real Windows before it is ticked.
+  - *Deviation (D-016):* the allow rule also covers 255.255.255.255 and 224.0.0.0/4 as local addresses.
 - [ ] Add the denylist port filter
+  - Firewall rules exist in `internal/winnet`; the in-tunnel filter is pending.
 - [ ] Complete the `lanprobe` test suite
 - [ ] `[Human]` Test real games from different LAN behavior classes across two homes
 
@@ -531,6 +542,12 @@ Deviations and decisions so far. See [DECISIONS.md](DECISIONS.md) for details.
 | D-010 | Discovery | Per-pair BEP 44 signing keys |
 | D-011 | Latency | High-resolution clock on Windows; `time.Now` steps are about 0.5 ms |
 | D-012 | Repository | Module path `github.com/NotrinoResearch/lanfolk`; relay host injected at build time, never committed |
+| D-013 | Discovery | DHT runs only while no relay is reachable, as a passive client (user choice) |
+| D-014 | Discovery | DHT salt and keys rotate every UTC day |
+| D-015 | Relay | Layered relay list (build default, owner-signed, user); register at up to 3 relays; pick by RTT |
+| D-016 | Firewall | Allow rule also covers broadcast and multicast local addresses |
+| D-017 | Process | A sub-agent wrote tests after code; one commit had a failing test, fixed next |
+| D-018 | Measurement | natprobe cannot measure NAT filtering with a single-address relay |
 
 ## Test plan
 

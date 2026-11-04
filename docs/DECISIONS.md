@@ -137,3 +137,89 @@ changed with one search and replace before the first public release.
 The VPS address must never be written to the repository, so there is no
 hard-coded default relay host. Release builds inject it at build time from
 the local, untracked `.env`. Users can always change it in Settings.
+
+## D-013 DHT runs only while no relay is reachable
+
+**Plan:** Read the Mainline DHT record when the relay is unreachable; publish
+on change and at least hourly.
+
+**Decision (user choice):** The DHT fallback is a setting, on by default, but
+the DHT node starts only after no shared relay has been reachable for 30
+seconds and stops when a relay comes back. While it runs it is a passive,
+read-only client (BEP 43: it does not answer other nodes' queries) on its own
+random port. Records are published and looked up only during the outage.
+
+**Why:** Encryption protects record contents and integrity, and the DHT is
+not in the trust path: a forged or replayed record can only waste probes,
+because paths and tunnels are authenticated with the pair keys and
+WireGuard. The remaining risks are not about content:
+
+- DHT nodes see the user's IP, and the nodes that store a record see both the
+  publisher's and the reader's IP, which links the two for a day.
+- The DHT library parses untrusted internet traffic inside the service, which
+  runs as LocalSystem. A torrent client has the same exposure but runs with
+  user rights.
+- Networks may classify the traffic as BitTorrent.
+
+Running the DHT only during relay outages keeps that exposure rare while
+keeping an automatic fallback for the single relay that exists today.
+
+**Open risk:** Moving the DHT client into a low-privilege helper process
+would remove the LocalSystem exposure. Revisit when a second relay exists,
+since the DHT then adds little.
+
+## D-014 DHT keys rotate every UTC day
+
+**Decision:** The BEP 44 salt, signing key and encryption key are derived
+from the pair secret and the UTC day (`identity.Pair.ForDHTEpoch`). Both the
+target and the visible signing key change daily, so storing nodes cannot
+follow a pair across days. Lookups try today and yesterday. A record more
+than about a day old cannot be opened at all.
+
+## D-015 Layered relay list with registration at every relay
+
+**Plan:** One shared relay; "additional relays can be added later".
+
+**Decision:** Two peers can only meet at a relay where both are registered,
+so the relay list must be shared. The effective list is, in order:
+
+1. The default relay injected at build time (an IP address for now; DNS
+   names are also supported).
+2. Up to three relays chosen by the network owner. They travel inside the
+   owner-signed member list, so members cannot change them.
+3. Relays the user adds in Settings.
+
+A client registers at up to three relays at once. The path manager keeps
+one shared relay path per relay and picks the lowest RTT. The first relay is
+used until RTTs are known.
+
+**Comparison:** RustDesk's ID server (hbbs) holds the relay pool, checks it
+every 3 s and assigns relays round-robin, without looking at latency.
+Lanfolk has no central ID server, and games need the fastest relay, so the
+owner-signed list provides consistency and selection is by measured RTT.
+A signed, remotely updatable default list is a possible later addition.
+
+## D-016 The virtual-LAN firewall rule also allows broadcast and multicast
+
+**Decision:** The inbound allow rule for the Lanfolk adapter lists local
+addresses 10.77.0.0/24, 255.255.255.255 and 224.0.0.0/4. Broadcast and
+multicast packets that Lanfolk writes to the adapter are not addressed to
+the member's own IP and would otherwise be dropped. The remote address is
+still limited to 10.77.0.0/24, and the denylist block rules still win.
+
+## D-017 Process notes
+
+- The `internal/discovery` package was written by a sub-agent that wrote
+  its tests after the code, against the tests-first rule. The tests were
+  reviewed during the merge and extended for daily key rotation.
+- Commit `55d275c` contained a failing `peermsg` limit test. A shell pipeline
+  hid the test's exit code. The fix is commit `5e3fff1`. The local shell now
+  uses `pipefail` so that a failing test stops the commit.
+
+## D-018 natprobe limits
+
+- Filtering behavior (address- or port-dependent) is not measured. That
+  needs a server that answers from a second address, and the relay has one.
+- `stun.l.google.com` and `stun1.l.google.com` can resolve to the same IPv4
+  address, so natprobe also uses `stun.cloudflare.com` to compare mappings
+  across different destinations.
