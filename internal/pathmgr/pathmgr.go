@@ -173,6 +173,8 @@ type path struct {
 	present    bool  // shared relay: the peer is registered too
 	advertised int64 // member relay: relaying member's RTT to the peer
 	offerAt    int64
+	activeAt   int64 // when the path last became active
+	failedAt   int64 // when the path last went from alive to dead
 }
 
 // PathInfo is a read-only view of a path.
@@ -408,7 +410,24 @@ func (m *Manager) alive(p *path, now int64) bool {
 	if isShared(p.kind) && !p.present {
 		return false
 	}
-	return p.lastRecv != 0 && now-p.lastRecv < m.deadAfter(p)
+	if p.lastRecv == 0 {
+		return false
+	}
+	ref := p.lastRecv
+	if p == m.active && p.activeAt > ref {
+		// A path that has just become active gets the full active timeout
+		// to answer: its last reply may be up to StandbyDeadAfter old.
+		ref = p.activeAt
+	}
+	return now-ref < m.deadAfter(p)
+}
+
+// fresh reports whether the path answered within the active timeout. Only
+// fresh paths may replace a working active path; otherwise a standby path
+// (alive for StandbyDeadAfter) would be dead the moment it became active
+// (DeadAfter) and the selection would flip on every tick.
+func (m *Manager) fresh(p *path, now int64) bool {
+	return p.lastRecv != 0 && now-p.lastRecv < int64(m.cfg.DeadAfter)
 }
 
 func (m *Manager) probeable(p *path) bool {
@@ -454,6 +473,7 @@ func (m *Manager) Tick(now int64) []Probe {
 			p.wasAlive, p.everAlive, p.backoff = true, true, 0
 		} else if p.wasAlive {
 			p.wasAlive = false
+			p.failedAt = now     // needs a new reply before it is used again
 			m.startBurst(p, now) // just failed: try to recover quickly
 		}
 		if !alive && now >= p.burstUntil {
@@ -517,15 +537,27 @@ func (m *Manager) OnAck(id uint64, now int64) (PathID, bool) {
 	return p.id, true
 }
 
-// OnInbound records any authenticated packet received on a path.
-func (m *Manager) OnInbound(id PathID, now int64) {
-	if p := m.paths[id]; p != nil && p.srtt > 0 {
-		p.lastRecv = now
+// OnInbound records an authenticated packet received on a path at time at.
+// Callers may repeat an older time; it never moves lastRecv backwards, which
+// would discard newer probe replies.
+func (m *Manager) OnInbound(id PathID, at int64) {
+	if p := m.paths[id]; p != nil && p.srtt > 0 && at > p.lastRecv {
+		p.lastRecv = at
 	}
 }
 
 func (m *Manager) usable(p *path, now int64) bool {
-	return m.probeable(p) && m.alive(p, now) && p.srtt > 0
+	return m.probeable(p) && m.alive(p, now) && p.srtt > 0 && p.lastRecv > p.failedAt
+}
+
+// score ranks usable paths, lower is better. Relays carry DirectPreference
+// so that a direct path wins unless a relay is clearly faster.
+func (m *Manager) score(p *path) int64 {
+	s := m.effective(p)
+	if p.kind.IsRelay() {
+		s += int64(m.cfg.DirectPreference)
+	}
+	return s
 }
 
 func (m *Manager) effective(p *path) int64 {
@@ -536,48 +568,45 @@ func (m *Manager) effective(p *path) int64 {
 }
 
 func (m *Manager) selectPath(now int64) {
-	var bestDirect, bestRelay *path
+	cur := m.active
+	curOK := cur != nil && m.usable(cur, now)
+	var choice *path
 	for _, id := range m.order {
 		p := m.paths[id]
 		if !m.usable(p, now) {
 			continue
 		}
-		if p.kind == Direct {
-			if bestDirect == nil || m.effective(p) < m.effective(bestDirect) {
-				bestDirect = p
-			}
-		} else if bestRelay == nil || m.effective(p) < m.effective(bestRelay) {
-			bestRelay = p
+		if curOK && p != cur && !m.fresh(p, now) {
+			continue // see fresh
+		}
+		if choice == nil || m.score(p) < m.score(choice) {
+			choice = p
 		}
 	}
-	var choice *path
-	switch {
-	case bestDirect != nil && (bestRelay == nil || m.effective(bestRelay)+int64(m.cfg.DirectPreference) > m.effective(bestDirect)):
-		choice = bestDirect
-	case bestRelay != nil:
-		choice = bestRelay
-	default:
+	if choice == nil {
 		// Nothing measured yet: start on the shared relay if the peer is
 		// registered there, so traffic flows while probes run.
-		if rp := m.bootstrapRelay(); rp != nil {
-			choice = rp
-		}
+		choice = m.bootstrapRelay()
 	}
-	if choice == m.active {
+	if choice == cur {
 		return
 	}
-	if cur := m.active; cur != nil && choice != nil && m.usable(cur, now) &&
-		cur.kind.IsRelay() == choice.kind.IsRelay() &&
-		m.effective(choice)+int64(m.cfg.Hysteresis) >= m.effective(cur) {
+	// Hysteresis: leaving a working path needs a clear gain. A move from a
+	// relay to a direct path needs none beyond DirectPreference, so the
+	// documented rule (direct unless a relay is 5 ms better) still holds;
+	// the way back to a relay needs DirectPreference plus Hysteresis.
+	toDirect := curOK && choice != nil && cur.kind.IsRelay() && !choice.kind.IsRelay()
+	if curOK && choice != nil && !toDirect && m.score(choice)+int64(m.cfg.Hysteresis) >= m.score(cur) {
 		return
 	}
-	if choice == nil && m.active != nil && m.paths[m.active.id] != nil {
+	if choice == nil && cur != nil && m.paths[cur.id] != nil {
 		// Keep sending on the last path; something may still get through.
 		return
 	}
 	m.active = choice
 	m.activeVer++
 	if choice != nil {
+		choice.activeAt = now
 		// The new active path is probed at the active rate right away.
 		if choice.nextProbe > now+int64(m.cfg.ActiveInterval) {
 			choice.nextProbe = now

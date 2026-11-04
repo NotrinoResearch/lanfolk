@@ -63,13 +63,13 @@ func (e *Engine) tickPaths() {
 		}
 		probes := pm.Tick(now)
 		type send struct {
-			v  *via
-			id uint64
+			info pathmgr.PathInfo
+			id   uint64
 		}
 		sends := make([]send, 0, len(probes))
 		for _, pr := range probes {
-			if v := e.viaForPath(pm, pr.Path); v != nil {
-				sends = append(sends, send{v, pr.ID})
+			if info, ok := pm.Path(pr.Path); ok {
+				sends = append(sends, send{info, pr.ID})
 			}
 		}
 		changed := pm.ActiveVersion() != p.pathVer
@@ -82,8 +82,12 @@ func (e *Engine) tickPaths() {
 		st := pm.Stats(now)
 		p.mu.Unlock()
 		p.stats.Store(&st)
+		// viaForInfo takes e.mu, so it runs after p.mu is released
+		// (rebuildAddrMap takes p.mu while holding e.mu).
 		for _, s := range sends {
-			e.sendMsg(p, &peermsg.PathProbe{ProbeID: s.id, PathID: uint32(s.v.pathID)}, s.v)
+			if v := e.viaForInfo(s.info); v != nil {
+				e.sendMsg(p, &peermsg.PathProbe{ProbeID: s.id, PathID: uint32(v.pathID)}, v)
+			}
 		}
 		if changed {
 			addrsChanged = true
@@ -104,14 +108,6 @@ func (e *Engine) tickPaths() {
 		e.rebuildAddrMap()
 		e.mu.Unlock()
 	}
-}
-
-func (e *Engine) viaForPath(pm *pathmgr.Manager, id pathmgr.PathID) *via {
-	info, ok := pm.Path(id)
-	if !ok {
-		return nil
-	}
-	return e.viaForInfo(info)
 }
 
 func (e *Engine) viaForInfo(info pathmgr.PathInfo) *via {

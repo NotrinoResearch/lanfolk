@@ -467,6 +467,7 @@ func (e *Engine) onHello(p *peer, m *peermsg.Hello) {
 		reply = false
 	}
 	p.helloRecv = now
+	renamed := p.nick != m.Nickname
 	p.nick = m.Nickname
 	p.remoteActive = m.ActiveNetwork
 	p.remoteFlags = m.Flags
@@ -493,6 +494,11 @@ func (e *Engine) onHello(p *peer, m *peermsg.Hello) {
 	e.mu.Unlock()
 	if confirm {
 		e.confirmFriend(p)
+	}
+	if renamed {
+		// Member lists and friends show the announced nickname.
+		go e.publishNetworks()
+		go e.publishFriends()
 	}
 	e.noteSeen(p, now)
 	for _, l := range push {

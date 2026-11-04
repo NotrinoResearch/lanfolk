@@ -118,6 +118,7 @@ func (e *Engine) SetNickname(n string) error {
 		go e.sendHello(p)
 	}
 	e.publishStatus()
+	go e.publishNetworks() // our own row in member lists
 	return nil
 }
 
@@ -141,7 +142,14 @@ func (e *Engine) Friends() []ipc.Friend {
 		e.mu.Unlock()
 		if p != nil {
 			fr.Online = p.online(now, e.cfg.OfflineAfter)
-			if fr.Nickname == "" {
+			// The nickname the friend announces wins over the stored one,
+			// which was typed when adding or copied at join time.
+			p.mu.Lock()
+			live := p.nick
+			p.mu.Unlock()
+			if live != "" {
+				fr.Nickname = live
+			} else if fr.Nickname == "" {
 				fr.Nickname = p.displayName()
 			}
 		}
@@ -151,24 +159,50 @@ func (e *Engine) Friends() []ipc.Friend {
 }
 
 // Networks lists the stored networks.
+//
+// The signed member list keeps the nickname a member had when it joined.
+// Members show their current nickname instead: our own, or the one a peer
+// last announced in Hello. The list nickname is the fallback for members we
+// have not heard from in this run.
 func (e *Engine) Networks() []ipc.Network {
+	type named struct {
+		net, mem int
+		p        *peer
+	}
+	var live []named
 	e.mu.Lock()
-	defer e.mu.Unlock()
 	me := e.key.Public()
+	nick := e.nick
 	out := make([]ipc.Network, 0, len(e.lists))
 	for _, l := range e.lists {
 		n := ipc.Network{ID: l.ID.String(), Name: l.Name, OwnerKey: l.Owner.Hex(), IsOwner: l.Owner == me,
 			Active: e.active != nil && e.active.ID == l.ID, Version: l.Version}
 		for _, m := range l.Members {
 			p := e.peers[m.PublicKey]
-			n.Members = append(n.Members, ipc.Member{PublicKey: m.PublicKey.Hex(), Nickname: m.Nickname,
+			mem := ipc.Member{PublicKey: m.PublicKey.Hex(), Nickname: m.Nickname,
 				VirtualIP: m.VirtualIP.String(), IsSelf: m.PublicKey == me, IsOwner: m.PublicKey == l.Owner,
-				IsFriend: p != nil && p.isFriend && p.confirmed})
+				IsFriend: p != nil && p.isFriend && p.confirmed}
+			if mem.IsSelf && nick != "" {
+				mem.Nickname = nick
+			} else if p != nil {
+				live = append(live, named{len(out), len(n.Members), p})
+			}
+			n.Members = append(n.Members, mem)
 		}
 		for _, r := range l.Relays {
 			n.Relays = append(n.Relays, ipc.Relay{Host: r.Host, UDPPort: int(r.UDPPort), TCPPort: int(r.TCPPort)})
 		}
 		out = append(out, n)
+	}
+	e.mu.Unlock()
+	// p.mu is taken after e.mu is released.
+	for _, x := range live {
+		x.p.mu.Lock()
+		n := x.p.nick
+		x.p.mu.Unlock()
+		if n != "" {
+			out[x.net].Members[x.mem].Nickname = n
+		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out

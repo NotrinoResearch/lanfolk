@@ -303,6 +303,47 @@ func TestFriendshipNeedsBothSides(t *testing.T) {
 	}
 }
 
+// memberName returns the nickname n shows for other's row in its first
+// network.
+func memberName(n, other *node) string {
+	nets := n.e.Networks()
+	if len(nets) == 0 {
+		return ""
+	}
+	for _, m := range nets[0].Members {
+		if m.PublicKey == other.e.PublicKey().Hex() {
+			return m.Nickname
+		}
+	}
+	return ""
+}
+
+// A renamed member shows its new nickname in member and friend lists on
+// both sides, although the signed member list keeps the old one
+// (2026-11-04 field test).
+func TestRenameShowsInMemberAndFriendLists(t *testing.T) {
+	r := startTestRelay(t)
+	a, b := newNode(t, "ahmet", r), newNode(t, "mehmet", r)
+	befriend(t, a, b)
+	createNetwork(t, a, b)
+	if err := a.e.SetNickname("osman"); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.e.SetNickname("caan"); err != nil {
+		t.Fatal(err)
+	}
+	if got := memberName(a, a); got != "osman" {
+		t.Fatalf("own row shows %q", got)
+	}
+	waitFor(t, 10*time.Second, "new nicknames in member lists", func() bool {
+		return memberName(b, a) == "osman" && memberName(a, b) == "caan" && memberName(b, b) == "caan"
+	})
+	waitFor(t, 5*time.Second, "new nicknames in friend lists", func() bool {
+		fa, fb := a.e.Friends(), b.e.Friends()
+		return len(fa) == 1 && fa[0].Nickname == "caan" && len(fb) == 1 && fb[0].Nickname == "osman"
+	})
+}
+
 func TestNetworkTunnelDirectPath(t *testing.T) {
 	r := startTestRelay(t)
 	a, b := newNode(t, "ahmet", r), newNode(t, "mehmet", r)

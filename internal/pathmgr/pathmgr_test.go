@@ -289,6 +289,84 @@ func TestInboundKeepsActivePathAlive(t *testing.T) {
 	}
 }
 
+// switchesDuring counts active path changes over d, sampled every 10 ms,
+// with an optional hook run before each step.
+func (s *sim) switchesDuring(d time.Duration, before func()) int {
+	n := 0
+	last := s.m.ActiveVersion()
+	for end := s.now + int64(d); s.now < end; {
+		if before != nil {
+			before()
+		}
+		s.run(10 * time.Millisecond)
+		if v := s.m.ActiveVersion(); v != last {
+			n += int(v - last)
+			last = v
+		}
+	}
+	return n
+}
+
+// A direct path that stops answering must fail over once, not bounce
+// between "alive as standby" (16 s) and "dead as active" (2 s) on every tick.
+func TestDeadDirectFailsOverOnce(t *testing.T) {
+	s := newSim(t, DefaultConfig())
+	r := s.m.SetSharedRelay(0, SharedRelay, true, s.now)
+	d, _ := s.m.AddDirect(addrA, SourceSTUN, s.now)
+	s.rtt[r], s.rtt[d] = 60*time.Millisecond, 20*time.Millisecond
+	s.run(5 * time.Second)
+	if s.active().Kind != Direct {
+		t.Fatal("expected direct")
+	}
+	s.down[d] = true
+	if n := s.switchesDuring(20*time.Second, nil); n != 1 {
+		t.Fatalf("%d path changes after the direct path died, want 1", n)
+	}
+	if s.active().Kind != SharedRelay {
+		t.Fatalf("active %v", s.active().Kind)
+	}
+}
+
+// The engine reports the time of the last WireGuard packet on every tick,
+// even when it is old. That must not erase newer probe replies (2026-11-04
+// field test: ~18,000 direct/relay switches in 30 minutes).
+func TestStaleInboundDoesNotFlap(t *testing.T) {
+	s := newSim(t, DefaultConfig())
+	r := s.m.SetSharedRelay(0, SharedRelay, true, s.now)
+	d, _ := s.m.AddDirect(addrA, SourceSTUN, s.now)
+	s.rtt[r], s.rtt[d] = 150*time.Millisecond, 30*time.Millisecond
+	s.run(5 * time.Second)
+	if s.active().Kind != Direct {
+		t.Fatal("expected direct")
+	}
+	stale := s.now // last WireGuard packet on the direct path, never refreshed
+	n := s.switchesDuring(30*time.Second, func() { s.m.OnInbound(d, stale) })
+	if n != 0 || s.active().Kind != Direct {
+		t.Fatalf("%d path changes, active %v; want a stable direct path", n, s.active().Kind)
+	}
+}
+
+// A better standby path replaces a working active path only right after it
+// answered, and it stays active afterwards.
+func TestPromotionToDirectIsStable(t *testing.T) {
+	s := newSim(t, DefaultConfig())
+	r := s.m.SetSharedRelay(0, SharedRelay, true, s.now)
+	s.rtt[r] = 150 * time.Millisecond
+	s.run(5 * time.Second)
+	d, _ := s.m.AddDirect(addrA, SourceSTUN, s.now)
+	s.down[d] = true
+	s.run(10 * time.Second) // burst fails, the path backs off
+	s.down[d] = false
+	s.rtt[d] = 30 * time.Millisecond
+	s.m.Restart(s.now)
+	if n := s.switchesDuring(30*time.Second, nil); n != 1 {
+		t.Fatalf("%d path changes, want 1", n)
+	}
+	if s.active().Kind != Direct {
+		t.Fatalf("active %v", s.active().Kind)
+	}
+}
+
 func TestDuplicateCandidatesAndLimit(t *testing.T) {
 	m := New(DefaultConfig())
 	id1, fresh := m.AddDirect(addrA, SourceSTUN, 0)
