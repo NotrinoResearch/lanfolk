@@ -478,3 +478,26 @@ the whole code base.
   is possible; their notices stay in `THIRD_PARTY_NOTICES.md`.
 - The license and the CLA have not been reviewed by a lawyer yet; that is
   listed in `docs/TODO.md`.
+
+## D-029 The default relay is a DNS name
+
+Date: 2026-11-04. Builds from 0.2.1 on use `lanfolk-relay1.notrino.com` as the
+default relay instead of an IP address (set in the untracked `build.env`, as
+before).
+
+**Why**: the relay can move to another server, for example one with DDoS
+protection, by changing the DNS record, without a new release. Clients
+resolve the name again every 5 minutes (`transport.RelayClient`). The record
+is "DNS only" in Cloudflare: Cloudflare's proxy carries only HTTP(S), so a
+proxied record would make the relay unreachable, and proxying UDP (Spectrum)
+would also hide the clients' real addresses that hole punching needs.
+
+**Consequences**
+
+- The name does not hide the server's address (DNS returns it) and gives no
+  DDoS protection by itself. Protection has to come from the server's
+  network; moving the relay to its own server with volumetric DDoS
+  protection is listed in `docs/TODO.md`.
+- The 0.2.0 release had the address built in; it was withdrawn and replaced
+  by 0.2.1. The address was never in the git history.
+- Naming further relays `lanfolk-relayN.notrino.com` keeps room for more.

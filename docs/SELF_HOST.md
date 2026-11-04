@@ -181,6 +181,8 @@ Remove the firewall rules you added (for example `sudo ufw delete allow 3478/udp
 There are two ways. Both only need the address and ports; players need no other change.
 
 - **Settings, custom relays (per user).** In Lanfolk open Settings and add a relay with your host name or IP address, the UDP port (3478) and the TCP port (443, or `0` for none). A client registers at up to three relays at once and uses the one with the lowest round trip time. Every player who should use this relay must add it, because two players can only meet at a relay where both are registered.
+
+Use a DNS name rather than an IP address where you can: you can then move the relay to another server by changing the record, and clients pick up the new address within about five minutes. If the name is on Cloudflare, set the record to "DNS only" (gray cloud). Cloudflare's proxy only carries web traffic, so a proxied record makes the relay unreachable.
 - **The network owner's relay list (per network).** The owner of a private network can attach up to three relays to the network. The list is signed by the owner and sent to every member, so members do not have to add anything. Use this for a group of friends.
 
 Custom relays are used in addition to the default relay that is built into the player's copy of Lanfolk. Traffic stays end-to-end encrypted whichever relay carries it.

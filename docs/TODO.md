@@ -54,6 +54,9 @@ Last updated: 4 November 2026.
 - [x] Add a contact address for commercial license requests to
       LICENSING.md (info@notrino.com).
 - [ ] Decide whether to register "Lanfolk" as a trademark.
+- [ ] Move the relay to its own server with DDoS protection (for example
+      OVH), away from other services, and point
+      `lanfolk-relay1.notrino.com` at it (D-029). No new release is needed.
 - [ ] Turn CI back on (it is manual-only now, D-002).
 - [ ] Add a second relay closer to players in Turkey. From the measured line
       the current relay is about 70 ms away, so two Turkish players on a

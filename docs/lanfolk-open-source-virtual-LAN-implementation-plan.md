@@ -589,6 +589,7 @@ Deviations and decisions so far. See [DECISIONS.md](DECISIONS.md) for details.
 | D-026 | Installer | Inno Setup 6 instead of NSIS: modern dynamic wizard, native 64-bit, PNG art, PATH task |
 | D-027 | Desktop UI | Compact main window with tray, separate Settings window process, row menus, brand generated from code, automation build |
 | D-028 | License | PolyForm Noncommercial 1.0.0 with commercial licenses from NotrinoResearch, CLA for contributions; earlier versions stay Apache-2.0 |
+| D-029 | Relay | The default relay is the DNS name lanfolk-relay1.notrino.com (Cloudflare DNS only), so it can move without a release |
 
 ## Test plan
 
