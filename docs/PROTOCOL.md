@@ -25,7 +25,7 @@ Every protocol change must update this file and add an entry to the
 7. [Member relay](#7-member-relay)
 8. [LanFrame](#8-lanframe)
 9. [Signed member list](#9-signed-member-list)
-10. [DHT record and connection code](#10-dht-record-and-connection-code)
+10. [DHT record, connection code and invite code](#10-dht-record-connection-code-and-invite-code)
 11. [Local control protocol](#11-local-control-protocol)
 12. [Change log](#12-change-log)
 
@@ -353,6 +353,9 @@ These values are used by the relay client in `internal/transport`:
 - It re-sends `Register` for every active session every **30 s**, and again
   after every change of transport.
 - It resolves the relay name again every 5 minutes.
+- On a clean exit it sends `Unregister` for every session, so that the
+  restarted client does not meet its own stale registration as `SessionFull`.
+  Invite sessions ([10.3](#103-invite-code)) are registered like pair sessions.
 - A client registers at up to three relays at once (the default relay, up to
   three relays from the signed member list, relays from the user's settings;
   decision D-015). The relay index is the position in that list.
@@ -411,6 +414,8 @@ boot[8] | counter[8] | type[1] | body
 | 5 | PathProbeAck | Answer a probe on the same path |
 | 6 | RelayOffer | Offer to relay for other members |
 | 7 | Bye | The sender is going offline |
+| 8 | JoinRequest | A joiner asks the owner of an invite code for a place in a network (invite sessions only, [10.3](#103-invite-code)) |
+| 9 | JoinAccepted | The owner's answer to a JoinRequest (invite sessions only) |
 
 An unknown type, or a body that is truncated or breaks a limit, makes the
 whole message invalid and it is dropped. Trailing bytes after a known body are
@@ -509,6 +514,23 @@ At most 90 entries. See section 7.
 #### Bye (7)
 
 Empty body. The receiver marks the peer offline immediately.
+
+#### JoinRequest (8) and JoinAccepted (9)
+
+These two messages travel only in an invite session, sealed with the invite
+key, never in a pair session. See [10.3](#103-invite-code) for the rules.
+
+```
+JoinRequest:  network_id[16] | joiner_key[32] | timestamp[8, unix seconds] |
+              nickname (len[1] + UTF-8, <= 32) | signature[64]
+JoinAccepted: network_id[16] | owner_nickname (len[1] + UTF-8, <= 32) |
+              network_name (len[1] + UTF-8, <= 64) | signature[64]
+```
+
+The signatures are Ed25519; what is signed is defined in 10.3. In an invite
+session the header's `boot` is the sender's boot value and `counter` a
+per-process counter, but receivers keep no replay window: a request is
+idempotent and bounded by its timestamp instead.
 
 ## 6. Path probing and selection
 
@@ -746,7 +768,7 @@ A decoder accepts a list only if all of these hold:
 - The relays in the list are owner-chosen shared relays. Every member
   registers at them in addition to its own relays (decision D-015).
 
-## 10. DHT record and connection code
+## 10. DHT record, connection code and invite code
 
 The DHT fallback (decisions D-010, D-013, D-014) lets two friends find each
 other's addresses when no shared relay is reachable. A connection code does
@@ -828,6 +850,100 @@ binary = sender_key_id[8] | expiry_unix[4] | nonce[24] |
   sender: rejected), checks that the key ID really belongs to that friend,
   decrypts, and rejects an expired code or one with no or malformed
   addresses.
+
+### 10.3 Invite code
+
+An invite code lets a friend join a private network with one pasted string
+instead of exchanging friend codes in both directions and waiting for the
+owner to add the new member (decision D-025).
+
+```
+code = "lanfolk-i1" | z-base32(binary)
+
+binary = owner_key[32] | network_id[16] | token[16] | expiry_unix[4] | checksum[4]
+checksum = SHA-256("lanfolk-i1" | owner_key | network_id | token | expiry_unix)[0:4]
+```
+
+- `token` is 128 random bits chosen by the owner. It is a bearer secret: whoever
+  holds the code can ask to join, like a Hamachi password.
+- z-base32 is the friend code alphabet, no padding (116 characters). When
+  parsing, spaces, tabs, line breaks and `-` are removed, letters are
+  lowercased and the literal prefix without its dash (`lanfolki1`) is matched.
+  The remaining text must decode to exactly 72 bytes, re-encode to the same
+  text (one spelling per code) and carry a correct checksum, else the code is
+  invalid. A code whose `expiry_unix` is not in the future is expired.
+- An invite is valid for **7 days** and can be used by any number of people
+  until it expires or the owner resets it. The owner keeps one invite per
+  owned network; asking for it returns the current code while it is valid.
+  A **reset** (or an expired code) creates a new token, which makes the old
+  code useless because nobody serves its session any more.
+
+**Session ID and key.** From the token both sides derive, with
+`HKDF-SHA256(ikm = token, salt = "lanfolk/v1/invite", info = label | owner_key | network_id)`:
+
+| Value | Label | Length |
+| --- | --- | --- |
+| Invite session ID (relay and control frames) | `lanfolk/v1/invite/session` | 16 |
+| Invite key (symmetric, both directions) | `lanfolk/v1/invite/key` | 32 |
+
+**Rendezvous.** The owner registers the invite session at all its relays
+(section 4.6) while it has an unexpired invite, whether or not that network is
+the active one. A joiner that redeems the code registers the same session. A
+control frame of type `0xF2` (section 5.1) with the invite session ID, sealed
+with the invite key, carries the messages. The relay needs no change: it sees
+two parties in a session, as for a pair. The invite code carries no relay
+hints, so owner and joiner meet at a relay both of them use, normally the
+build's default relay. Direct paths are not used for invite sessions.
+
+**JoinRequest.** After `PeerJoined` or `peer_present = 1` the joiner sends
+JoinRequest to every relay where the owner is present and repeats it every
+**3 s** while the join is not accepted, until the invite expires. It also
+registers the session again at every relay where the owner is not present, so
+that a `SessionFull` rejection (another joiner is inside) is retried.
+`signature` is the joiner's Ed25519 signature over
+
+```
+"lanfolk/v1/join-request" 0x00 | invite_session[16] | network_id[16] | joiner_key[32] | timestamp[8]
+```
+
+The owner ignores the request, without a reply, unless all of this holds: the
+frame opens with the invite key; the invite is the owner's current, unexpired
+one for that network; `network_id` matches; `joiner_key` is not the owner's;
+`timestamp` is within **+/-10 minutes** of the owner's clock; the signature
+verifies; at most **30 new joiners per invite per hour** (a repeated request
+from a joiner that is already pending does not count; a reset clears the
+count); and the network has a free address. Valid frames are handled at most
+once per 200 ms per invite session.
+
+**Owner behavior.** For a valid request the owner adds the joiner as a friend
+(if it is not one) and marks the friend with the network as pending. As soon as
+the friendship is active (mutual Hello with the friend flag), it adds the joiner
+to the member list, which the normal membership machinery pushes. If the joiner
+is a member already, the owner only answers. The answer is JoinAccepted, sealed
+with the invite key and sent to the relay the request came from. `signature` is
+the owner's Ed25519 signature over
+
+```
+"lanfolk/v1/join-accepted" 0x00 | invite_session[16] | network_id[16] | joiner_key[32]
+```
+
+**Joiner behavior.** On redeeming, the joiner adds the owner as a friend at
+once (so the pair session is registered and the friendship can be confirmed),
+records a pending join, and registers the invite session. When a JoinAccepted
+with a valid owner signature arrives it leaves the invite session and waits
+for the member list, which arrives over the pair session and activates the
+network if no other is active. A join is listed with the state `waiting` (owner
+not answered yet), `joining` (accepted, list on its way), `joined` or `expired`.
+Pending joins and owned invites are stored and survive restarts of the service.
+
+**Limitations.** The owner must be online during the exchange; joining waits
+otherwise. The invite session holds two parties, so a second simultaneous
+joiner is rejected with `SessionFull` and gets in once the first has left the
+session (a joiner leaves as soon as it is accepted). A client that exits
+cleanly unregisters its sessions; after a crash the relay keeps the old party
+until it has been silent for 30 s (section 4.3). A person who was removed from
+a network can join again with a valid code, so an owner who removes someone
+should also reset the invite.
 
 ### Address encoding
 
@@ -913,6 +1029,10 @@ those in `internal/ipc/api.go`; field names are the JSON names.
 | `conncode.create` | `{public_key}` | `{code, expires}` | Create a connection code for a friend |
 | `conncode.use` | `{code}` | none | Use a connection code received from a friend |
 | `diagnostics.export` | none | `{report}` | Text report for bug reports |
+| `invites.create` | `{network_id, reset?}` | `{code, expires}` | Owner gets the invite code of a network (the current one while valid; `reset: true` makes a new one) |
+| `invites.redeem` | `{code}` | `{network_id, owner_public_key, state}` | Start joining with an invite code (`state` is `waiting`, or the state of an identical join already in progress) |
+| `invites.list` | none | `[PendingJoin]` | Invite codes the user redeemed and their progress |
+| `invites.cancel` | `{network_id}` | none | Stop waiting for an invite (the owner stays a friend) |
 
 For methods whose result or parameter type the Go declaration does not state
 (`identity.setNickname`'s result, `networks.*`'s result, `conncode.create`'s
@@ -958,6 +1078,14 @@ the parameter and result structs and is authoritative for the field names.
 (relaying member's nickname or the relay name), `ping_ms`, `avg_ping_ms`,
 `jitter_ms`, `loss_pct`, `quality` (`good`, `fair`, `poor` or `unknown`).
 
+`PendingJoin`: `network_id`, `network_name` (optional, known once the owner
+accepted), `owner_public_key`, `owner_nickname` (optional), `state`
+(`waiting`, `joining`, `joined` or `expired`), `expires` (RFC 3339; while
+`joining` it is the time after which the join is given up). Entries stay in
+the list for a day after they end. A UI shows `waiting` as "Waiting for
+<owner> to come online", `joining` as "Joining..." and shows the network at
+`joined`.
+
 `Settings`: `relay_only`, `compat_mode`, `manual_port` (0 = automatic),
 `port_mapping`, `dht_fallback`, `custom_relays` (`[Relay]`), `default_relay`
 (read-only).
@@ -970,12 +1098,14 @@ the parameter and result structs and is authoritative for the field names.
 | `peers` | `[Peer]` | Every second while a network is active |
 | `friends` | `[Friend]` | On change |
 | `networks` | `[Network]` | On change |
+| `invites` | `[PendingJoin]` | On change of any pending join |
 
 ## 12. Change log
 
 | Date | Version | Change |
 | --- | --- | --- |
 | 2026-11-04 | 1 | First complete specification: demultiplexing, identity and key derivation, shared relay (D-007), control frames, path selection, member relay, LanFrame, signed member list with relays (D-015), DHT record and connection code (D-010, D-013, D-014), local control protocol. |
+| 2026-11-04 | 1 | Invite codes (D-025): `lanfolk-i1` code, invite session and key derivation, control message types 8 and 9 (JoinRequest, JoinAccepted), IPC methods `invites.*` and event `invites`. A compatible addition: types 8 and 9 travel only in invite sessions, so clients that do not know them never see them. |
 
 Rules for changes: a change that old and new clients cannot both understand
 increases the protocol version announced in Hello and is described here before
