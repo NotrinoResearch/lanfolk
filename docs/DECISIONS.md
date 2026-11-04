@@ -223,3 +223,52 @@ still limited to 10.77.0.0/24, and the denylist block rules still win.
 - `stun.l.google.com` and `stun1.l.google.com` can resolve to the same IPv4
   address, so natprobe also uses `stun.cloudflare.com` to compare mappings
   across different destinations.
+
+## D-019 Local data in one JSON file
+
+**Plan:** The local data model lists tables (identity, friends, networks,
+members, peer_cache, settings).
+
+**Decision:** The tables are arrays and objects in one JSON file
+(`%ProgramData%\Lanfolk\lanfolk.json`), replaced atomically on every
+change. The data is small (a few hundred records at most), and a database
+would add a large dependency. A damaged file is renamed aside and a fresh one
+is started, so the service always comes up. The plan's settings fields
+`relay_host`, `relay_udp_port` and `relay_tcp_port` became the custom relay
+list (D-015).
+
+## D-020 Tests after code for the engine, service and CLI
+
+The engine, the service and the CLI were written before their end-to-end
+tests, against the tests-first rule. The tests followed in the same session
+before anything was committed. The tunwrap and UI packages were written tests
+first.
+
+## D-021 Relay socket queues and readers
+
+**Decision:** The relay's UDP socket buffers are 1 MB instead of 4 MB. Under
+overload the larger buffers queued packets for about 290 ms; now they are
+dropped instead, as the plan's low-latency rules ask. Extra reader goroutines
+can be enabled with `RELAY_UDP_READERS`. The default stays 1, because extra
+readers did not raise throughput on the development machine and can reorder
+packets of one flow. See the load results in MEASUREMENTS.md.
+
+## D-022 The installer is a 32-bit NSIS program
+
+Official NSIS builds produce 32-bit installers. The installer requires 64-bit
+Windows 10 or later and installs the 64-bit binaries into the 64-bit Program
+Files folder.
+
+## D-023 Control pipe access
+
+The pipe's security descriptor allows LocalSystem, Administrators and
+interactive users. On top of that, the service accepts only the user who ran
+`lanfolk-service install` (recorded as the owner) and elevated
+administrators. If no owner was recorded, the first client becomes the owner.
+
+## D-024 Development flags of the service
+
+`lanfolk-service run` accepts `-listen`, `-loopback-candidates`, `-relay`
+and `-no-tun`. They let several instances run on one machine without
+administrator rights, without a firewall prompt and against a local relay.
+The NAT simulation uses them on Linux.

@@ -11,10 +11,11 @@ Lanfolk is not a VPN for your internet traffic: only traffic to the virtual netw
 What exists and is covered by automated tests:
 
 - the shared relay (`lanfolk-relay`, STUN, signaling and fallback forwarding over UDP and TCP) with its Docker deployment, running on a test server;
-- the building blocks of the client: identity and friend codes, signed member lists, the wire formats, the path manager, peer messages, the relay client and WireGuard bind, UPnP/NAT-PMP/PCP port mapping, DHT fallback records and connection codes, Windows adapter and firewall configuration, and the local control protocol;
-- the measurement tools `natprobe` and `lanprobe`.
+- the client: identity and friend codes, signed member lists, the path manager, the relay client and WireGuard bind, broadcast and multicast over the tunnel, member relaying, UPnP/NAT-PMP/PCP port mapping, the DHT fallback and connection codes, Windows adapter and firewall configuration, all tied together by the engine;
+- the Windows service (`lanfolk-service`), the command line client (`lanfolk-cli`) and the desktop app (`Lanfolk.exe`);
+- the measurement tools `natprobe` and `lanprobe`, and the NSIS installer script.
 
-What is still being written: the Windows service (`lanfolk-service`), the command line client (`lanfolk-cli`) and the desktop app (`Lanfolk.exe`). Until they exist, the installer and the user guide describe the intended version 1.0 behavior. Several test gates need real hardware and ISP lines and are still open; see [docs/DECISIONS.md](docs/DECISIONS.md) and the progress notes in the [implementation plan](docs/lanfolk-open-source-virtual-LAN-implementation-plan.md).
+What is still open: tests that need administrator rights, two Windows machines and real ISP lines (Wintun, firewall rules, the installer on clean Windows, the line matrix and real games). See the progress notes in the [implementation plan](docs/lanfolk-open-source-virtual-LAN-implementation-plan.md), [docs/TESTING.md](docs/TESTING.md) and [docs/DECISIONS.md](docs/DECISIONS.md).
 
 ## Quick start (players)
 
@@ -47,7 +48,10 @@ The byte-level details are in [docs/PROTOCOL.md](docs/PROTOCOL.md).
 | `cmd/lanfolk-relay` | Shared relay (STUN, signaling, fallback forwarding) |
 | `cmd/natprobe` | NAT and DHT measurement tool |
 | `cmd/lanprobe` | LAN behavior and tunnel latency test tool |
-| `cmd/lanfolk-service`, `cmd/lanfolk-cli`, `ui` | Windows service, command line client and desktop app (not written yet) |
+| `cmd/lanfolk-service`, `cmd/lanfolk-cli`, `ui` | Windows service, command line client and desktop app (Wails) |
+| `internal/engine` | Client core that ties all packages together |
+| `internal/store` | Local data file |
+| `internal/tunwrap` | LAN layer: broadcast and multicast copying, port filter |
 | `internal/clock` | High-resolution clock for latency measurements |
 | `internal/discovery` | DHT records (BEP 44) and connection codes |
 | `internal/identity` | Keys, friend codes and pair secrets |
@@ -85,7 +89,7 @@ Release build on Windows (PowerShell 5.1 or later, NSIS 3 optional, for the inst
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-release.ps1 -Version 1.0.0
 ```
 
-The script builds all binaries with `-trimpath`, downloads and verifies `wintun.dll` (`scripts\fetch-wintun.ps1`), regenerates `THIRD_PARTY_NOTICES.md` (`go run ./scripts/gen-notices`), builds the installer and writes `SHA256SUMS` into `dist\`. Use `-AllowMissing` while the service and UI are not written yet.
+The script builds all binaries with `-trimpath`, downloads and verifies `wintun.dll` (`scripts\fetch-wintun.ps1`), regenerates `THIRD_PARTY_NOTICES.md` (`go run ./scripts/gen-notices`), builds the installer and writes `SHA256SUMS` into `dist\`.
 
 The default relay is not stored in the repository. Create an untracked `build.env` in the repository root with the relay you want to build in (use your own values):
 

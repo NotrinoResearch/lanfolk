@@ -396,11 +396,17 @@ Read this file to connect to the VPS and deploy the relay. Use `ip` as `RELAY_PU
 ### Phase 1: Static tunnel
 
 - [ ] Create the Wintun adapter and assign IP and MTU
-- [ ] Integrate wireguard-go with a custom `conn.Bind`
-- [ ] Connect two manually configured clients
-- [ ] Build the overhead measurement tool
+  - Implemented (`internal/winnet`, `internal/engine`); it needs an elevated run on real Windows before it is ticked.
+- [x] Integrate wireguard-go with a custom `conn.Bind`
+  - WireGuard peers use endpoints that name the peer; the path manager picks the address at send time.
+- [x] Connect two manually configured clients
+  - Verified with friend codes and a network instead of hand-written configs: engine tests with in-memory adapters, and the real binaries with `lanfolk-cli` on one machine.
+- [x] Build the overhead measurement tool
+  - `lanprobe latency -compare` for real machines; `TestTunnelOverhead` for the software part: 0.10 ms p50 and 0.61 ms p99 overhead on one machine (MEASUREMENTS.md).
 
 **Gate:** Virtual IP ping works and direct-path overhead meets the target.
+
+> Status: the software overhead meets the target. A ping between two real machines through Wintun is still needed.
 
 ### Phase 2: Docker relay
 
@@ -433,92 +439,116 @@ Read this file to connect to the VPS and deploy the relay. Use `ip` as `RELAY_PU
 - [x] Implement key generation, DPAPI storage and friend codes
   - *Deviation (D-008):* friend codes carry a 4-byte checksum so that mistyped codes are rejected.
   - *Deviation (D-009):* WireGuard static keys are derived from the Ed25519 identity key, so one friend code is enough to configure a peer.
-- [ ] Implement mutual friend adding
+- [x] Implement mutual friend adding
+  - A Hello flag says the sender has added the receiver. The friendship becomes active only when both flags are seen.
 - [x] Derive session IDs and encryption keys from the pair secret
   - *Deviation (D-010):* the BEP 44 signing key is also derived from the pair secret, so DHT records cannot be linked to identities.
-- [ ] Exchange status and candidates through the relay
-- [ ] Complete the end-to-end flow with `lanfolk-cli`
+- [x] Exchange status and candidates through the relay
+- [x] Complete the end-to-end flow with `lanfolk-cli`
+  - Smoke test with the real binaries: two services, a local relay and the CLI. Friends become active, the network forms and the path becomes direct.
 
 **Gate:** Two clients become friends by code and establish a tunnel automatically.
 
+> Status: passed in automated tests on one machine. Two machines on real lines are still needed.
+
 ### Phase 4: Direct path
 
-- [ ] Implement STUN and candidate collection
-- [ ] Demultiplex packet types on one UDP socket
-- [ ] Implement probes and the path selection state machine
-- [ ] Add IPv6, UPnP, NAT-PMP and PCP support
-  - UPnP, NAT-PMP and PCP are implemented and tested against fake gateways in `internal/portmap`. IPv6 candidates and service integration are pending.
-- [ ] Add manual port settings
-- [ ] Handle reconnection after path loss and IP changes
+- [x] Implement STUN and candidate collection
+  - The relay returns the observed address in Pong and RegisterAck. Candidates also come from interfaces (local IPv4, global IPv6), port mapping and the manual port.
+- [x] Demultiplex packet types on one UDP socket
+- [x] Implement probes and the path selection state machine
+- [x] Add IPv6, UPnP, NAT-PMP and PCP support
+  - UPnP, NAT-PMP and PCP are tested against fake gateways; real routers are untested.
+- [x] Add manual port settings
+- [x] Handle reconnection after path loss and IP changes
+  - Failover after 2 s of silence and recovery are tested. Local address changes restart probing.
 
 **Gate:** Suitable line pairs move from relay to direct path without user action.
 
+> Status: the move from relay to direct works in automated tests. Real line pairs and the NAT simulation are still needed.
+
 ### Phase 5: Private networks
 
-- [ ] Implement network creation and member add and remove flows
+- [x] Implement network creation and member add and remove flows
 - [x] Implement signed member lists and version checks
   - Implemented and tested in `internal/network`; service integration is tracked by the other items of this phase.
 - [x] Implement virtual IP allocation
-- [ ] Implement full-mesh member connections
-- [ ] Test the owner-offline scenario
+- [x] Implement full-mesh member connections
+- [x] Test the owner-offline scenario
 
 **Gate:** Three members connect to one private network and outsiders cannot join.
 
+> Status: passed in automated tests (`internal/engine`).
+
 ### Phase 6: Member relay and DHT fallback
 
-- [ ] Implement the member relay protocol and rate limits
-- [ ] Select relays by total RTT
+- [x] Implement the member relay protocol and rate limits
+- [x] Select relays by total RTT
+  - Offers carry the relaying member's RTT, and the probes measure the full path.
 - [x] Implement BEP 44 publish and lookup
   - Implemented in `internal/discovery` and tested on a local DHT network; service integration is pending.
   - *Deviation (D-013):* the DHT runs only while no relay is reachable, as a passive client.
   - *Deviation (D-014):* salt and keys rotate every UTC day.
 - [x] Implement time-limited connection codes
   - Implemented and tested in `internal/discovery`; service integration is pending.
-- [ ] Test the relay-down scenario
+- [x] Test the relay-down scenario
 
 **Gate:** With the shared relay down, a suitable member and DHT can establish a connection.
 
+> Status: passed in automated tests: a member relay takes over, and two restarted members find each other through a private DHT.
+
 ### Phase 7: LAN behavior
 
-- [ ] Implement broadcast and multicast capture and copying
-- [ ] Write incoming packets to the adapter
+- [x] Implement broadcast and multicast capture and copying
+  - Copying is tested with real WireGuard devices. The loopback capture of 255.255.255.255 needs an elevated run.
+- [x] Write incoming packets to the adapter
+  - Tested with in-memory adapters; `lanprobe wintun-selftest` checks Wintun.
 - [ ] Implement compatibility mode and metric restoration
+  - Implemented; it needs an elevated run on real Windows before it is ticked.
 - [ ] Configure Private profile and firewall rule for the adapter
   - Implemented in `internal/winnet` and unit tested. It needs an elevated run on real Windows before it is ticked.
   - *Deviation (D-016):* the allow rule also covers 255.255.255.255 and 224.0.0.0/4 as local addresses.
-- [ ] Add the denylist port filter
-  - Firewall rules exist in `internal/winnet`; the in-tunnel filter is pending.
-- [ ] Complete the `lanprobe` test suite
+- [x] Add the denylist port filter
+  - Enforced inside the tunnel in both directions (tested) and by firewall rules (needs an elevated run).
+- [x] Complete the `lanprobe` test suite
+  - The two-machine run is part of the human test below.
 - [ ] `[Human]` Test real games from different LAN behavior classes across two homes
 
 **Gate:** `lanprobe` passes every supported behavior and real games show matching results.
 
 ### Phase 8: UI and installer
 
-- [ ] Implement the named pipe protocol between service and UI
-- [ ] Build friend, private network and member screens
-- [ ] Show path type, ping, jitter, loss, quality and relay details per member
-- [ ] Update connection changes live
-- [ ] Add settings: Relay only, compatibility mode, manual port and relay address
-- [ ] Add diagnostic report export
+- [x] Implement the named pipe protocol between service and UI
+  - *Deviation (D-023):* access is limited to the installing user and administrators.
+- [x] Build friend, private network and member screens
+- [x] Show path type, ping, jitter, loss, quality and relay details per member
+- [x] Update connection changes live
+- [x] Add settings: Relay only, compatibility mode, manual port and relay address
+  - *Deviation (D-015):* custom relays are a list, and the DHT fallback and port mapping are switches too.
+- [x] Add diagnostic report export
 - [ ] Build the Windows installer, service registration and uninstaller
+  - The NSIS script compiles and `lanfolk-service install`/`uninstall` exist. It has not run on a clean Windows VM yet (D-022).
 
 **Gate:** On clean Windows, setup, adding friends, creating a network and uninstalling all work.
 
 ### Phase 9: Hardening
 
 - [ ] Add NAT simulation tests to CI
-- [ ] Remove data-path allocations and latency outliers
-- [ ] Run security tests and protocol fuzzing
-- [ ] Load test the relay
+- [x] Remove data-path allocations and latency outliers
+  - The LAN layer allocates nothing per unicast packet. Relay socket queues were shortened after the load test (D-021).
+- [x] Run security tests and protocol fuzzing
+  - Fuzz targets cover all network parsers. Tests cover outsiders, removed members, spoofed sources and blocked ports.
+- [x] Load test the relay
+  - Results are in MEASUREMENTS.md. A 3.6% delivery gap in the Linux harness is still open.
 - [ ] `[Human]` Run a closed beta with at least 10 users and 4 ISPs
 
 **Gate:** Acceptance criteria pass and no known critical bug remains.
 
 ### Phase 10: Release
 
-- [ ] Complete license files and third-party notices
-- [ ] Publish `README`, setup and relay documentation
+- [x] Complete license files and third-party notices
+- [x] Publish `README`, setup and relay documentation
+  - Written in the repository; they are published with the release.
 - [ ] `[Human]` Approve code signing
 - [ ] Publish v1.0 on GitHub Releases
 
@@ -548,6 +578,12 @@ Deviations and decisions so far. See [DECISIONS.md](DECISIONS.md) for details.
 | D-016 | Firewall | Allow rule also covers broadcast and multicast local addresses |
 | D-017 | Process | A sub-agent wrote tests after code; one commit had a failing test, fixed next |
 | D-018 | Measurement | natprobe cannot measure NAT filtering with a single-address relay |
+| D-019 | Storage | Local tables live in one atomically replaced JSON file |
+| D-020 | Process | Engine, service and CLI tests were written after the code |
+| D-021 | Relay | 1 MB socket buffers so overload drops instead of queueing; optional extra readers |
+| D-022 | Installer | 32-bit NSIS installer for 64-bit binaries |
+| D-023 | Security | Control pipe limited to the installing user and administrators |
+| D-024 | Development | Service flags for running several instances on one machine |
 
 ## Test plan
 
