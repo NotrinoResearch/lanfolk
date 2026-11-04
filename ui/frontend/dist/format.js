@@ -247,8 +247,8 @@
     }
   }
 
-  /** Members other than you, and how many of them are online. */
-  function onlineCount(network, peers) {
+  /** How many members are online, you included when selfOnline. */
+  function onlineCount(network, peers, selfOnline) {
     var online = {};
     (peers || []).forEach(function (p) {
       if (p.online) online[p.public_key] = true;
@@ -260,7 +260,7 @@
       others++;
       if (online[m.public_key]) on++;
     });
-    return { online: on, others: others };
+    return { online: on + (selfOnline ? 1 : 0), total: others + 1, others: others };
   }
 
   /** Suggested name for a new network. */

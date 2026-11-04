@@ -186,12 +186,13 @@ test('joinStateText', () => {
   assert.equal(F.joinStateText({ state: 'expired' }), 'The invite expired');
 });
 
-test('onlineCount ignores yourself', () => {
+test('onlineCount counts you when you are connected', () => {
   const net = { members: [{ public_key: 'me', is_self: true }, { public_key: 'a' }, { public_key: 'b' }] };
   const peers = [{ public_key: 'a', online: true }, { public_key: 'b', online: false }];
-  assert.deepEqual(F.onlineCount(net, peers), { online: 1, others: 2 });
-  assert.deepEqual(F.onlineCount(net, []), { online: 0, others: 2 });
-  assert.deepEqual(F.onlineCount({ members: [{ is_self: true }] }, []), { online: 0, others: 0 });
+  assert.deepEqual(F.onlineCount(net, peers, true), { online: 2, total: 3, others: 2 });
+  assert.deepEqual(F.onlineCount(net, peers, false), { online: 1, total: 3, others: 2 });
+  assert.deepEqual(F.onlineCount(net, [], true), { online: 1, total: 3, others: 2 });
+  assert.deepEqual(F.onlineCount({ members: [{ is_self: true }] }, [], true), { online: 1, total: 1, others: 0 });
 });
 
 test('defaultNetworkName', () => {

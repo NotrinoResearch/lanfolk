@@ -66,7 +66,7 @@ func TestTrayViewOnline(t *testing.T) {
 	if v.Icon != trayOnline {
 		t.Fatalf("icon = %q, want online", v.Icon)
 	}
-	if v.Status != "Friday LAN · 1 of 2 online" {
+	if v.Status != "Friday LAN · 2 of 3 online" {
 		t.Fatalf("status = %q", v.Status)
 	}
 	if v.IP != "10.77.0.2" {
@@ -78,7 +78,7 @@ func TestTrayViewOnline(t *testing.T) {
 	if !v.Networks[0].Active || v.Networks[1].Active {
 		t.Fatalf("networks = %+v", v.Networks)
 	}
-	if !strings.HasPrefix(v.Tooltip, "Lanfolk") || !strings.Contains(v.Tooltip, "1 of 2 online") {
+	if !strings.HasPrefix(v.Tooltip, "Lanfolk") || !strings.Contains(v.Tooltip, "2 of 3 online") {
 		t.Fatalf("tooltip = %q", v.Tooltip)
 	}
 }

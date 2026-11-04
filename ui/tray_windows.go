@@ -6,6 +6,7 @@ import (
 	"context"
 	"embed"
 	"encoding/json"
+	"fmt"
 	"runtime"
 	"sync"
 	"time"
@@ -209,35 +210,26 @@ func (t *tray) handleClicks() {
 	for {
 		select {
 		case <-t.open.ClickedCh:
-			t.showWindow()
+			t.doOpen()
 		case <-t.copyIP.ClickedCh:
-			t.mu.Lock()
-			ip := t.model.IP
-			t.mu.Unlock()
-			if ip != "" {
-				t.app.CopyToClipboard(ip)
-			}
+			t.doCopyIP()
 		case i := <-slotClicks:
 			t.mu.Lock()
 			id := t.slotIDs[i]
+			t.mu.Unlock()
+			t.doNetwork(id)
+			t.mu.Lock()
 			active := id == t.model.ActiveNetworkID
 			t.mu.Unlock()
-			if id != "" && !active {
-				go t.app.ActivateNetwork(id)
-			} else if active {
+			if active {
 				t.slots[i].Check() // a click toggles the checkmark; keep it
 			}
 		case <-t.disconnect.ClickedCh:
-			go t.app.ActivateNetwork("")
+			t.doDisconnect()
 		case <-t.invite.ClickedCh:
-			t.mu.Lock()
-			id := t.model.ActiveNetworkID
-			t.mu.Unlock()
-			t.showWindow()
-			t.navigate(map[string]string{"view": "invite", "network_id": id})
+			t.doInvite()
 		case <-t.settings.ClickedCh:
-			t.showWindow()
-			t.navigate(map[string]string{"view": "settings"})
+			t.doSettings()
 		case <-t.quit.ClickedCh:
 			if ctx := t.host.context(); ctx != nil {
 				wailsruntime.Quit(ctx)
@@ -245,6 +237,73 @@ func (t *tray) handleClicks() {
 			return
 		}
 	}
+}
+
+// The tray actions; the menu and the automation API both call these.
+
+func (t *tray) doOpen() { t.showWindow() }
+
+func (t *tray) doCopyIP() {
+	t.mu.Lock()
+	ip := t.model.IP
+	t.mu.Unlock()
+	if ip != "" {
+		t.app.CopyToClipboard(ip)
+	}
+}
+
+func (t *tray) doNetwork(id string) {
+	t.mu.Lock()
+	active := id == t.model.ActiveNetworkID
+	t.mu.Unlock()
+	if id != "" && !active {
+		go t.app.ActivateNetwork(id)
+	}
+}
+
+func (t *tray) doDisconnect() { go t.app.ActivateNetwork("") }
+
+func (t *tray) doInvite() {
+	t.mu.Lock()
+	id := t.model.ActiveNetworkID
+	t.mu.Unlock()
+	t.showWindow()
+	t.navigate(map[string]string{"view": "invite", "network_id": id})
+}
+
+func (t *tray) doSettings() {
+	t.showWindow()
+	t.navigate(map[string]string{"view": "settings"})
+}
+
+// currentModel returns what the tray shows now.
+func (t *tray) currentModel() trayModel {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.model
+}
+
+// simulate runs a tray menu item as if it was clicked.
+func (t *tray) simulate(item, id string) error {
+	switch item {
+	case "open":
+		t.doOpen()
+	case "copy-ip":
+		t.doCopyIP()
+	case "network":
+		t.doNetwork(id)
+	case "disconnect":
+		t.doDisconnect()
+	case "invite":
+		t.doInvite()
+	case "settings":
+		t.doSettings()
+	case "toggle":
+		t.toggleWindow()
+	default:
+		return fmt.Errorf("unknown tray item %q", item)
+	}
+	return nil
 }
 
 // navigate asks the frontend to open a view (handled in app.js).

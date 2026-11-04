@@ -202,7 +202,7 @@ try {
     if (Test-Path -LiteralPath (Join-Path $repoRoot 'ui')) {
         Write-Host 'Building Lanfolk.exe (desktop UI)'
         $uiFlags = "-H windowsgui -s -w -X $ver.Version=$Version"
-        Invoke-Native 'go' @('build', '-trimpath', '-tags', 'desktop,production', '-ldflags', $uiFlags, '-o', (Join-Path $stage 'Lanfolk.exe'), './ui')
+        Invoke-Native 'go' @('build', '-trimpath', '-tags', 'desktop,production,nomock', '-ldflags', $uiFlags, '-o', (Join-Path $stage 'Lanfolk.exe'), './ui')
     } else {
         Write-Warning './ui does not exist yet; skipping Lanfolk.exe.'
         $missing += 'Lanfolk.exe'

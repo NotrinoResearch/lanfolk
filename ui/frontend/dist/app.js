@@ -204,7 +204,7 @@
       '<p>Lanfolk needs its background service to reach your friends. If you just installed it, restart your computer.' +
       (S.service.message ? ' ' + esc(S.service.message) : '') + '</p>' +
       '<div class="stack"><button type="button" class="btn" data-action="retry">' + icon('refresh') + 'Try again</button></div>' +
-      '<p class="hint" style="margin-top:14px">This window reconnects by itself.</p></div>';
+      '<p class="hint gap-top">This window reconnects by itself.</p></div>';
   }
 
   function onboardingHTML() {
@@ -216,7 +216,7 @@
       '<div class="field"><label for="ob-name">What should your friends call you?</label>' +
       '<input class="input" id="ob-name" name="nick" maxlength="32" value="' + esc(nick) + '" data-autofocus spellcheck="false"></div>' +
       '<button type="submit" class="btn primary block">Continue</button></form>' +
-      '</div><p class="note">' + icon('external') + '<span>Lanfolk keeps running in the notification area when you close this window.</span></p></div>';
+      '</div><p class="note">' + icon('info') + '<span>Lanfolk keeps running in the notification area when you close this window.</span></p></div>';
   }
 
   function homeHTML() {
@@ -278,21 +278,22 @@
       (spinning ? '<span class="spinner" aria-hidden="true"></span>' : icon('warning')) +
       '<div class="pending-text"><div class="pending-title">' + esc(name) + '</div>' +
       '<div class="pending-sub">' + esc(F.joinStateText(j)) + '</div></div>' +
-      '<button type="button" class="btn" style="height:28px;padding:0 10px;font-size:13px" data-action="cancel-join" data-id="' + esc(j.network_id) + '">' +
+      '<button type="button" class="btn sm" data-action="cancel-join" data-id="' + esc(j.network_id) + '">' +
       (j.state === 'expired' ? 'Dismiss' : 'Cancel') + '</button></div>';
   }
 
   function networkHTML(n) {
     var open = S.open[n.id] != null ? S.open[n.id] : n.active;
-    var count = F.onlineCount(n, n.active ? S.peers : []);
+    var selfOn = n.active && selfState().dot === 'online';
+    var count = F.onlineCount(n, n.active ? S.peers : [], selfOn);
     var meta;
-    if (n.active) meta = count.others === 0 ? 'Only you so far' : count.online + ' of ' + count.others + ' online';
-    else meta = F.plural(count.others + 1, 'member');
+    if (n.active) meta = count.others === 0 ? 'Only you so far' : count.online + ' of ' + count.total + ' online';
+    else meta = F.plural(count.total, 'member');
     var html = '<div class="net' + (open ? ' open' : '') + (n.active ? ' active' : '') + '" data-key="net-' + esc(n.id) + '">' +
       '<div class="net-head">' +
       '<button type="button" class="net-toggle" data-action="toggle-net" data-id="' + esc(n.id) + '" aria-expanded="' + !!open + '">' +
       icon('chevron') + '<span class="net-name">' + esc(n.name) + '</span>' +
-      (n.active ? '<span class="net-meta">' + esc(meta) + '</span>' : '<span class="net-meta">' + esc(meta) + '</span>') + '</button>' +
+      '<span class="net-meta">' + esc(meta) + '</span></button>' +
       (n.active ? '' : '<button type="button" class="btn net-connect" data-action="connect" data-id="' + esc(n.id) + '">Connect</button>') +
       '<button type="button" class="icon-btn" data-action="net-menu" data-id="' + esc(n.id) + '" aria-haspopup="menu" title="More" aria-label="More options for ' + esc(n.name) + '">' + icon('more') + '</button>' +
       '</div>';
@@ -301,7 +302,7 @@
       membersOf(n).forEach(function (m) { html += memberHTML(n, m); });
       if (n.is_owner && n.members.length <= 1) {
         html += '<li class="member" data-key="invite-hint"><button type="button" class="member-row" data-action="invite" data-id="' + esc(n.id) + '">' +
-          '<span></span><span class="m-name" style="color:var(--accent-text)">Invite friends…</span><span></span></button></li>';
+          '<span></span><span class="m-name accent">Invite friends…</span><span></span></button></li>';
       }
       html += '</ul>';
     }
@@ -341,10 +342,17 @@
     var html = '<li class="member' + (open ? ' open' : '') + '" data-key="m-' + esc(key) + '">' +
       '<button type="button" class="member-row" data-action="member" data-id="' + esc(n.id) + '" data-key2="' + esc(key) + '" aria-expanded="' + open + '">' +
       '<span class="dot ' + dot + '" aria-hidden="true"></span>' +
-      '<span class="m-name">' + esc(m.nickname || 'Unnamed') + (m.is_self ? '<small>you</small>' : '') + (m.is_owner ? '<small>owner</small>' : '') +
+      '<span class="m-name">' + esc(m.nickname || 'Unnamed') + tagsHTML(m) +
       '<span class="m-ip">' + esc(m.virtual_ip) + '</span></span>' + right + '</button>';
     if (open) html += detailHTML(n, m);
     return html + '</li>';
+  }
+
+  function tagsHTML(m) {
+    var t = [];
+    if (m.is_self) t.push('You');
+    if (m.is_owner) t.push('Owner');
+    return t.length ? '<small>' + t.join(' · ') + '</small>' : '';
   }
 
   function detailHTML(n, m) {
@@ -399,7 +407,7 @@
       (S.joinError ? '<p class="error-text" role="alert">' + esc(S.joinError) + '</p>' : (S.args.pasted ? '<p class="hint">Pasted from your clipboard.</p>' : '')) +
       '</div><div><button type="button" class="btn" data-action="paste">' + icon('paste') + 'Paste</button></div>' +
       '<div class="grow"></div>' +
-      '<p class="hint" style="margin-bottom:12px">The network’s owner has to be online for you to join. Lanfolk keeps trying until they are.</p>' +
+      '<p class="hint gap-bottom">The network’s owner has to be online for you to join. Lanfolk keeps trying until they are.</p>' +
       '<button type="submit" class="btn primary block"' + attr('disabled', S.busy.join) + '>' + (S.busy.join ? 'Joining…' : 'Join network') + '</button></form>';
   }
 
@@ -437,49 +445,66 @@
     var s = S.settings;
     var html = subhead('Settings') + '<div class="scroll" data-key="settings"><div class="settings">';
 
-    html += '<section class="group"><h2>Profile</h2><div class="card">' +
+    // General: the few things a player may want to change.
+    html += '<section class="group" data-key="g-general"><h2>General</h2><div class="card">' +
       rowHTML('Nickname', 'Friends and members see this name.',
         '<input class="input" data-field="nickname" maxlength="32" value="' + esc(st.nickname) + '" spellcheck="false" aria-label="Nickname">', 'nick') +
       rowHTML('Open at sign-in', 'Start Lanfolk in the notification area when you sign in to Windows.',
-        S.autostart == null ? '' : toggleHTML('autostart', S.autostart, 'Open at sign-in'), 'auto') +
-      '</div></section>';
-
+        S.autostart == null ? '' : toggleHTML('autostart', S.autostart, 'Open at sign-in'), 'auto');
     if (s) {
-      html += '<section class="group"><h2>Games</h2><div class="card">' +
-        rowHTML('Compatibility mode', 'Turn on if a game does not find the others. Sends all broadcast traffic through Lanfolk.',
+      html += rowHTML('Compatibility mode', 'Turn on if a game does not find the others. Sends all broadcast traffic through Lanfolk.',
           toggleHTML('compat_mode', s.compat_mode, 'Compatibility mode'), 'compat') +
-        '</div></section>';
+        rowHTML('Relay only', 'Hides your IP address from members. Adds latency.', toggleHTML('relay_only', s.relay_only, 'Relay only'), 'ro');
+    }
+    html += '</div></section>';
 
-      html += '<section class="group"><h2>Connection</h2><div class="card">' +
-        rowHTML('Relay only', 'Hides your IP address from members. Adds latency.', toggleHTML('relay_only', s.relay_only, 'Relay only'), 'ro') +
+    // Advanced: off the main path, collapsed by default.
+    html += '<section class="group" data-key="g-adv"><button type="button" class="disclosure" data-action="advanced" aria-expanded="' + !!S.advanced + '">' +
+      icon('chevron') + '<span class="disclosure-text"><span>Advanced</span><span class="disclosure-hint">Connection, relays, friends, backup, diagnostics</span></span></button>';
+    if (S.advanced) html += advancedHTML(st, s);
+    html += '</section>';
+
+    html += '<section class="group" data-key="g-about"><h2>About</h2><div class="card"><div class="row" data-key="about"><div class="about">' + mark(32) +
+      '<div><div class="row-title">Lanfolk ' + esc(st.version) + '</div><div class="row-desc">Open source under the Apache License 2.0.</div>' +
+      '<div class="about-links"><button type="button" class="link" data-action="url" data-url="https://github.com/NotrinoResearch/lanfolk">Project page</button>' +
+      '<button type="button" class="link" data-action="url" data-url="https://github.com/NotrinoResearch/lanfolk/blob/main/THIRD_PARTY_NOTICES.md">Third-party notices</button></div>' +
+      '</div></div></div></div></section>';
+
+    return html + '</div></div>';
+  }
+
+  function advancedHTML(st, s) {
+    var html = '';
+    if (s) {
+      html += '<h3 class="subgroup">Connection</h3><div class="card">' +
         rowHTML('Automatic port mapping', 'Ask your router (UPnP, NAT-PMP) to open a port for faster direct connections.', toggleHTML('port_mapping', s.port_mapping, 'Automatic port mapping'), 'pm') +
         rowHTML('Public DHT fallback', 'If no relay can be reached, find members through the BitTorrent DHT. Your IP address becomes visible there.', toggleHTML('dht_fallback', s.dht_fallback, 'Public DHT fallback'), 'dht') +
         rowHTML('Fixed UDP port', 'For a port you forwarded on your router. Leave empty for automatic.',
           '<input class="input narrow num" data-field="manual_port" inputmode="numeric" maxlength="5" placeholder="Auto" value="' + (s.manual_port ? s.manual_port : '') + '" aria-label="Fixed UDP port">', 'mp') +
-        '</div></section>';
+        '</div>';
 
-      html += '<section class="group"><h2>Relays</h2><div class="card"><div class="row row-stack" data-key="relays"><div class="row-text">' +
+      html += '<h3 class="subgroup">Relays</h3><div class="card"><div class="row row-stack" data-key="relays"><div class="row-text">' +
         '<div class="row-desc">Relays forward encrypted traffic when a direct connection is not possible. They cannot read it.</div></div>';
       (st.relays || []).forEach(function (r, i) {
         var up = r.mode === 'udp' || r.mode === 'tcp';
         html += '<div class="relay-line" data-key="r' + i + '"><span class="dot ' + (up ? 'online' : 'attention') + '"></span><span>' + esc(r.name) +
-          ' <span class="hint" style="display:inline">· ' + esc(r.source) + '</span></span><span class="num">' +
+          ' <span class="muted">· ' + esc(r.source) + '</span></span><span class="num">' +
           (up ? esc(F.relayModeLabel(r.mode).split(' ')[0] + ' · ' + F.formatMs(r.rtt_ms)) : 'Down') + '</span></div>';
       });
       (s.custom_relays || []).forEach(function (r, i) {
         html += '<div class="relay-line" data-key="c' + i + '"><span>Your relay: ' + esc(F.formatRelay(r)) + '</span>' +
-          '<button type="button" class="link" style="margin-left:auto" data-action="remove-relay" data-index="' + i + '">Remove</button></div>';
+          '<button type="button" class="link push" data-action="remove-relay" data-index="' + i + '">Remove</button></div>';
       });
       html += '<form class="inline-form" data-form="relay" autocomplete="off">' +
         '<input class="input" name="host" placeholder="Add a relay: host" aria-label="Relay host" spellcheck="false">' +
         '<input class="input num" name="udp" value="3478" aria-label="UDP port" inputmode="numeric">' +
         '<input class="input num" name="tcp" value="443" aria-label="TCP port" inputmode="numeric">' +
-        '<button type="submit" class="btn" style="height:30px">Add</button></form></div></div></section>';
+        '<button type="submit" class="btn sm">Add</button></form></div></div>';
     }
 
-    html += '<section class="group"><h2>Friends</h2><div class="card"><div class="row row-stack" data-key="friends"><div class="row-text">' +
+    html += '<h3 class="subgroup">Friends</h3><div class="card"><div class="row row-stack" data-key="friends"><div class="row-text">' +
       '<div class="row-desc">Invites make people friends automatically. You can also exchange friend codes by hand.</div></div>' +
-      '<div class="relay-line"><span class="mono selectable" style="flex:1">' + esc(st.friend_code) + '</span>' +
+      '<div class="relay-line"><span class="mono selectable grow">' + esc(st.friend_code) + '</span>' +
       '<button type="button" class="icon-btn" data-action="copy" data-text="' + esc(st.friend_code) + '" data-label="Friend code copied" title="Copy your friend code" aria-label="Copy your friend code">' + icon('copy') + '</button></div>';
     S.friends.forEach(function (f) {
       html += '<div class="friend" data-key="f-' + esc(f.public_key) + '"><span class="dot ' + (f.online ? 'online' : 'offline') + '"></span>' +
@@ -487,29 +512,22 @@
         esc(f.state === 'active' ? F.friendPresence(f, Date.now()) : 'Waiting for them to add you') + '</div></div>' +
         '<button type="button" class="icon-btn" data-action="remove-friend" data-key2="' + esc(f.public_key) + '" title="Remove friend" aria-label="Remove ' + esc(f.nickname) + '">' + icon('trash') + '</button></div>';
     });
-    html += '<form class="inline-form" style="grid-template-columns:1fr auto" data-form="friend" autocomplete="off">' +
+    html += '<form class="inline-form two" data-form="friend" autocomplete="off">' +
       '<input class="input" name="code" placeholder="Paste a friend code" aria-label="Friend code" spellcheck="false">' +
-      '<button type="submit" class="btn" style="height:30px">Add</button></form></div></div></section>';
+      '<button type="submit" class="btn sm">Add</button></form></div></div>';
 
-    html += '<section class="group"><h2>Identity</h2><div class="card">' +
+    html += '<h3 class="subgroup">Identity</h3><div class="card">' +
       rowHTML('Back up your identity', 'A password-protected file. Restore it after reinstalling Windows so friends do not have to add you again.',
         '<button type="button" class="btn" data-action="backup">Back up…</button>', 'bk') +
       rowHTML('Restore from a backup', 'Replaces the identity on this computer.', '<button type="button" class="btn" data-action="restore">Restore…</button>', 'rs') +
-      '</div></section>';
+      '</div>';
 
-    html += '<section class="group"><h2>Troubleshooting</h2><div class="card">' +
+    html += '<h3 class="subgroup">Troubleshooting</h3><div class="card">' +
       rowHTML('Diagnostic report', 'Connection details for a bug report. It contains no keys or passwords.',
         '<button type="button" class="btn" data-action="diagnostics">Save…</button>', 'dg') +
       rowHTML('Service', esc('UDP port ' + st.listen_port + (st.port_mapping ? ' · mapped by ' + st.port_mapping.toUpperCase() : '') + ' · DHT ' + F.dhtLabel(st.dht).split(' ')[0].toLowerCase()), '', 'svc') +
-      '</div></section>';
-
-    html += '<section class="group"><h2>About</h2><div class="card"><div class="row" data-key="about"><div class="about">' + mark(32) +
-      '<div><div class="row-title">Lanfolk ' + esc(st.version) + '</div><div class="row-desc">Open source under the Apache License 2.0.</div>' +
-      '<div class="about-links"><button type="button" class="link" data-action="url" data-url="https://github.com/NotrinoResearch/lanfolk">Project page</button>' +
-      '<button type="button" class="link" data-action="url" data-url="https://github.com/NotrinoResearch/lanfolk/blob/main/THIRD_PARTY_NOTICES.md">Third-party notices</button></div>' +
-      '</div></div></div></div></section>';
-
-    return html + '</div></div>';
+      '</div>';
+    return html;
   }
 
   // --------------------------------------------------------------- actions --
@@ -587,7 +605,7 @@
       var d = $('#dialog');
       d.innerHTML = '<form method="dialog"><div class="dialog-body"><h2>' + esc(opts.title) + '</h2><p>' + esc(opts.text) + '</p>' +
         (opts.input ? '<input class="input" name="v" ' + (opts.password ? 'type="password" ' : '') + 'value="' + esc(opts.value || '') + '" aria-label="' + esc(opts.input) + '" placeholder="' + esc(opts.input) + '" maxlength="64">' : '') +
-        (opts.input2 ? '<input class="input" style="margin-top:8px" name="v2" type="password" aria-label="' + esc(opts.input2) + '" placeholder="' + esc(opts.input2) + '">' : '') +
+        (opts.input2 ? '<input class="input gap-top-sm" name="v2" type="password" aria-label="' + esc(opts.input2) + '" placeholder="' + esc(opts.input2) + '">' : '') +
         '</div><div class="dialog-foot"><button type="button" class="btn" value="cancel" data-close>Cancel</button>' +
         '<button type="submit" class="btn ' + (opts.danger ? 'primary' : 'primary') + '" value="ok">' + esc(opts.ok || 'OK') + '</button></div></form>';
       var done = false;
@@ -664,6 +682,7 @@
     var key = el.getAttribute('data-key2');
     switch (a) {
       case 'retry': call('Retry'); break;
+      case 'advanced': S.advanced = !S.advanced; render(); break;
       case 'go': go(el.getAttribute('data-view')); break;
       case 'back': go('home'); break;
       case 'power': togglePower(); break;
@@ -880,4 +899,6 @@
   });
 
   render();
+  // Events sent before this script ran are lost; ask for the current state.
+  call('Resync').catch(function () {});
 })();

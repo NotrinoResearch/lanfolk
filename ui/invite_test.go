@@ -75,3 +75,26 @@ func TestTeeHostCopiesEvents(t *testing.T) {
 		t.Fatalf("host saw %v", n)
 	}
 }
+
+// The frontend registers its listeners after Wails' OnStartup, so events
+// sent before the page loaded are lost. Resync sends the current state again.
+func TestResyncReemitsState(t *testing.T) {
+	f := newFake(t, testAddr(t), map[string]any{
+		ipc.MethodStatus:       ipc.Status{Version: "resync"},
+		ipc.MethodListNetworks: []ipc.Network{{ID: "n"}},
+	})
+	a, h := startedApp(t, f)
+	h.wait(t, ipc.EventStatus, nil)
+	h.clear()
+	a.Resync()
+	h.wait(t, eventService, serviceIs(true))
+	h.wait(t, ipc.EventStatus, func(d any) bool { s, ok := d.(ipc.Status); return ok && s.Version == "resync" })
+	h.wait(t, ipc.EventNetworks, nil)
+
+	// Without a service, Resync still tells the page that it is not running.
+	f.stop()
+	h.wait(t, eventService, serviceIs(false))
+	h.clear()
+	a.Resync()
+	h.wait(t, eventService, serviceIs(false))
+}

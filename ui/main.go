@@ -81,11 +81,12 @@ func main() {
 		HideWindowOnClose: true, // the close button sends the app to the tray
 		BackgroundColour:  bg,
 		AssetServer:       &assetserver.Options{Assets: assets},
-		Bind:              []any{app},
+		Bind:              append([]any{app}, devBindings()...),
 		OnStartup: func(ctx context.Context) {
 			host.setContext(ctx)
 			app.start(context.Background())
 			tr.start()
+			startAutomation(host, tr)
 		},
 		OnShutdown: func(context.Context) {
 			tr.stop()

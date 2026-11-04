@@ -58,6 +58,7 @@ type mockService struct {
 	networks []ipc.Network
 	settings ipc.Settings
 	pending  map[string]time.Time // friend key -> when the friend "adds us back"
+	inv      mockInvites
 	tick     int
 }
 
@@ -304,6 +305,9 @@ func (m *mockService) handle(_ context.Context, method string, params json.RawMe
 }
 
 func (m *mockService) dispatch(method string, params json.RawMessage) (any, error) {
+	if res, ok, err := m.dispatchInvite(method, params); ok {
+		return res, err
+	}
 	switch method {
 	case ipc.MethodStatus:
 		return m.status(), nil

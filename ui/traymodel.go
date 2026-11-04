@@ -75,10 +75,11 @@ func trayView(s traySnapshot) trayModel {
 				online++
 			}
 		}
+		// Counts include you, like the member list in the window.
 		if others == 0 {
 			m.Status = active.Name + " · waiting for friends"
 		} else {
-			m.Status = fmt.Sprintf("%s · %d of %d online", active.Name, online, others)
+			m.Status = fmt.Sprintf("%s · %d of %d online", active.Name, online+1, others+1)
 		}
 		m.Icon = trayOnline
 		if !st.AdapterUp || (online == 0 && others > 0 && !anyRelayUp(st.Relays)) {

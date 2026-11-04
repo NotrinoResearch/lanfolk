@@ -158,6 +158,26 @@ func (a *App) Retry() {
 	}
 }
 
+// Resync sends the service state and, when connected, a fresh snapshot of
+// status, networks, peers, friends and invites. The page calls it once its
+// listeners are registered: events emitted before the page loaded are lost
+// (OnStartup connects before the frontend's JavaScript runs).
+func (a *App) Resync() {
+	a.mu.RLock()
+	c := a.client
+	s := a.lastState
+	known := a.announced
+	a.mu.RUnlock()
+	if !known {
+		// The connection loop has not decided yet; its first event follows.
+		return
+	}
+	a.host.Emit(eventService, s)
+	if c != nil {
+		go a.snapshot(context.Background(), c)
+	}
+}
+
 func (a *App) connect(ctx context.Context) (*ipc.Client, error) {
 	dctx, cancel := context.WithTimeout(ctx, dialTimeout)
 	defer cancel()
