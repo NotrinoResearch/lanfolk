@@ -16,6 +16,7 @@ require (
 )
 
 require (
+	github.com/Microsoft/go-winio v0.6.4 // indirect
 	github.com/alecthomas/atomic v0.1.0-alpha2 // indirect
 	github.com/anacrolix/chansync v0.7.0 // indirect
 	github.com/anacrolix/generics v0.1.1-0.20251125230353-15d98d46693b // indirect
