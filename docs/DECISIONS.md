@@ -442,3 +442,39 @@ intimidating.
 **Not done**: Mica window material (a transparent window would render badly
 on Windows 10; the flat `#f3f3f3` / `#202020` grounds match Mica's tone),
 notifications when a member comes online, and a UI translation.
+
+## D-028 Source available under PolyForm Noncommercial 1.0.0
+
+Date: 2026-11-04. Replaces the Apache-2.0 choice of the plan ("Open-source
+release").
+
+NotrinoResearch treats Lanfolk as a company product: it must stay free for
+players while companies, LAN centers and anyone selling or bundling it need a
+commercial license. Apache-2.0 allows all of that for free.
+
+**Decision**: license the code under the PolyForm Noncommercial License 1.0.0
+(`LICENSE`, with the `Required Notice` line for NotrinoResearch) and sell
+commercial licenses separately (`LICENSING.md`). Contributions need the
+Contributor License Agreement (`CLA.md`) so NotrinoResearch can keep licensing
+the whole code base.
+
+**Alternatives considered**
+
+- Business Source License 1.1: also restricts commercial use, but turns into
+  an open source license on a fixed date. Not wanted for now.
+- AGPL-3.0 with a commercial license: real open source, but it allows
+  commercial use by anyone who publishes their changes, so it does not meet the
+  requirement.
+- Keeping Apache-2.0: allows competitors to sell Lanfolk.
+
+**Consequences**
+
+- Lanfolk is source available, not open source; the README and the app say
+  so.
+- Code published until commit `7272ca9` (tag `apache-2.0-final`) stays
+  available under Apache-2.0 to anyone who got it.
+- All third-party dependencies are under permissive or file-level licenses
+  (MIT, BSD, Apache-2.0, MPL-2.0, the Wintun DLL license, OFL), so the change
+  is possible; their notices stay in `THIRD_PARTY_NOTICES.md`.
+- The license and the CLA have not been reviewed by a lawyer yet; that is
+  listed in `docs/TODO.md`.

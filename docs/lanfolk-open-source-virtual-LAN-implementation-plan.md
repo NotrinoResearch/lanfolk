@@ -588,6 +588,7 @@ Deviations and decisions so far. See [DECISIONS.md](DECISIONS.md) for details.
 | D-025 | Onboarding | One `lanfolk-i1` invite code replaces the friend-code exchange and manual add; rendezvous in a relay session derived from the code's token, owner must be online, bearer token with 7-day expiry and reset |
 | D-026 | Installer | Inno Setup 6 instead of NSIS: modern dynamic wizard, native 64-bit, PNG art, PATH task |
 | D-027 | Desktop UI | Compact main window with tray, separate Settings window process, row menus, brand generated from code, automation build |
+| D-028 | License | PolyForm Noncommercial 1.0.0 with commercial licenses from NotrinoResearch, CLA for contributions; earlier versions stay Apache-2.0 |
 
 ## Test plan
 
@@ -640,6 +641,8 @@ Most DPI information for Turkey comes from VPN vendors. Do not treat it as confi
 ## Open-source release
 
 **Use Apache-2.0 because it is permissive and includes an explicit patent grant.** This is not legal advice. Verify third-party terms file by file before release.
+
+*Deviation (D-028):* from 2026-11-04 Lanfolk is source available under the PolyForm Noncommercial License 1.0.0, with commercial licenses from NotrinoResearch. Versions up to tag `apache-2.0-final` stay Apache-2.0.
 
 | Component | Status | Action |
 | --- | --- | --- |

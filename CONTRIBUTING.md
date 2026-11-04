@@ -1,6 +1,6 @@
 # Contributing to Lanfolk
 
-Thank you for helping. Lanfolk is an open-source virtual LAN for LAN gaming.
+Thanks for helping. Lanfolk is a virtual LAN for LAN gaming, made by NotrinoResearch with public source code.
 This page explains how to work on it. For installing and using Lanfolk see
 [docs/SETUP.md](docs/SETUP.md); for running a relay see
 [docs/SELF_HOST.md](docs/SELF_HOST.md).
@@ -101,10 +101,15 @@ build time from the untracked `build.env` file (see [README.md](README.md));
 
 ## Licenses
 
-Lanfolk is licensed under Apache-2.0. By contributing you agree that your
-contribution is licensed under the same license. Do not copy code from
-projects with incompatible licenses; in particular, do not copy GPL code
-(for example WinIPBroadcast): implement the method independently.
+Lanfolk is licensed under the PolyForm Noncommercial License 1.0.0, and
+NotrinoResearch sells commercial licenses ([LICENSING.md](LICENSING.md)).
+Before your first pull request is merged you need to agree to the
+[Contributor License Agreement](CLA.md): add the sentence it gives to the pull
+request description. You keep the copyright in your work.
+
+Do not copy code from projects with incompatible licenses. In particular, do
+not copy GPL code (for example WinIPBroadcast); implement the method
+independently.
 
 `THIRD_PARTY_NOTICES.md` is generated. After changing dependencies run:
 

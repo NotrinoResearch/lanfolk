@@ -34,7 +34,7 @@
 #endif
 
 #define AppName      "Lanfolk"
-#define Publisher    "Lanfolk contributors"
+#define Publisher    "NotrinoResearch"
 #define ProjectUrl   "https://github.com/NotrinoResearch/lanfolk"
 #define ServiceExe   "lanfolk-service.exe"
 #define UiExe        "Lanfolk.exe"
@@ -50,11 +50,11 @@ AppPublisher={#Publisher}
 AppPublisherURL={#ProjectUrl}
 AppSupportURL={#ProjectUrl}/issues
 AppUpdatesURL={#ProjectUrl}/releases
-AppCopyright=Apache License 2.0
+AppCopyright=Copyright (c) 2026 NotrinoResearch
 VersionInfoVersion={#VERSION}.0
 VersionInfoCompany={#Publisher}
 VersionInfoDescription={#AppName} installer
-VersionInfoCopyright=Apache License 2.0
+VersionInfoCopyright=Copyright (c) 2026 NotrinoResearch
 VersionInfoProductName={#AppName}
 VersionInfoProductVersion={#VERSION}
 

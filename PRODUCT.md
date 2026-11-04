@@ -20,7 +20,7 @@ Lanfolk makes computers on different internet connections behave as if they were
 
 ## Positioning
 
-Open source (Apache-2.0), peer-to-peer with WireGuard encryption, and with no central account server: identities are local keys, networks are owner-signed member lists, and the shared relay only forwards encrypted packets. Anyone can run their own relay. Broadcast and multicast are carried, so LAN discovery works, while Windows file sharing and remote desktop ports stay blocked between members by default.
+Source available (PolyForm Noncommercial 1.0.0, free for personal use; commercial licenses from NotrinoResearch), peer-to-peer with WireGuard encryption, and with no central account server: identities are local keys, networks are owner-signed member lists, and the shared relay only forwards encrypted packets. Anyone can run their own relay. Broadcast and multicast are carried, so LAN discovery works, while Windows file sharing and remote desktop ports stay blocked between members by default.
 
 ## Operating Context
 

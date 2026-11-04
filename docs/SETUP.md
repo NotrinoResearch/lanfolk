@@ -199,7 +199,7 @@ Many games find servers by broadcasting on the local network.
 Lanfolk adds firewall rules for the virtual adapter and marks the network Private. If you use another firewall or antivirus, allow the game on the `Lanfolk` adapter (`10.77.0.0/24`). Do not open Windows file sharing or Remote Desktop to the virtual network; Lanfolk blocks those ports on purpose (TCP 135, 139, 445, 3389, 5985-5986 and UDP 137-138).
 
 **Antivirus blocks the installer or the adapter.**
-Lanfolk is open source and uses the signed Wintun driver DLL to create the adapter. If your antivirus quarantines a file, restore it, add an exception for `C:\Program Files\Lanfolk`, and check the SHA-256 checksums of the download against `SHA256SUMS`.
+Lanfolk's source code is public and it uses the signed Wintun driver DLL to create the adapter. If your antivirus quarantines a file, restore it, add an exception for `C:\Program Files\Lanfolk`, and check the SHA-256 checksums of the download against `SHA256SUMS`.
 
 **The relay is unreachable.**
 The main window shows "No relay can be reached" (the relay is Down under Settings, Relays). Some networks block UDP or the relay's port; Lanfolk then tries the TCP fallback automatically, which shows as **TCP fallback**. If both fail: check your internet connection, try another network (for example a phone hotspot), check whether your firewall or the university or office network blocks outgoing connections, and try again later. You can add another relay under Settings, Relays, or use connection codes.

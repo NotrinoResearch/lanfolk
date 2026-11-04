@@ -631,7 +631,7 @@
           '<button type="submit" class="btn sm">Use code</button></form></div>';
       case 'about':
         return '<div class="card"><div class="row" data-key="about"><div class="about">' + mark(40) +
-          '<div><div class="row-title">Lanfolk ' + esc(st.version) + '</div><div class="row-desc">Open source under the Apache License 2.0.</div>' +
+          '<div><div class="row-title">Lanfolk ' + esc(st.version) + '</div><div class="row-desc">Source available under the PolyForm Noncommercial License 1.0.0. Free for personal use.</div>' +
           '<div class="about-links"><button type="button" class="link" data-action="url" data-url="https://github.com/NotrinoResearch/lanfolk">Project page</button>' +
           '<button type="button" class="link" data-action="url" data-url="https://github.com/NotrinoResearch/lanfolk/blob/main/THIRD_PARTY_NOTICES.md">Third-party notices</button></div>' +
           '</div></div></div></div>';

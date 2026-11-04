@@ -20,7 +20,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends libcap2-bin \
 FROM scratch
 LABEL org.opencontainers.image.title="lanfolk-relay" \
       org.opencontainers.image.description="Lanfolk shared relay: STUN, signaling and fallback forwarding" \
-      org.opencontainers.image.licenses="Apache-2.0"
+      org.opencontainers.image.licenses="PolyForm-Noncommercial-1.0.0"
 COPY --from=build /out/lanfolk-relay /lanfolk-relay
 USER 65532:65532
 ENTRYPOINT ["/lanfolk-relay"]
