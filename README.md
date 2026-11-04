@@ -13,7 +13,7 @@ What exists and is covered by automated tests:
 - the shared relay (`lanfolk-relay`, STUN, signaling and fallback forwarding over UDP and TCP) with its Docker deployment, running on a test server;
 - the client: identity and friend codes, signed member lists, the path manager, the relay client and WireGuard bind, broadcast and multicast over the tunnel, member relaying, UPnP/NAT-PMP/PCP port mapping, the DHT fallback and connection codes, Windows adapter and firewall configuration, all tied together by the engine;
 - the Windows service (`lanfolk-service`), the command line client (`lanfolk-cli`) and the desktop app (`Lanfolk.exe`);
-- the measurement tools `natprobe` and `lanprobe`, and the NSIS installer script.
+- the measurement tools `natprobe` and `lanprobe`, and the Inno Setup installer script.
 
 What is still open: tests that need administrator rights, two Windows machines and real ISP lines (Wintun, firewall rules, the installer on clean Windows, the line matrix and real games). See the progress notes in the [implementation plan](docs/lanfolk-open-source-virtual-LAN-implementation-plan.md), [docs/TESTING.md](docs/TESTING.md) and [docs/DECISIONS.md](docs/DECISIONS.md).
 
@@ -69,7 +69,7 @@ The byte-level details are in [docs/PROTOCOL.md](docs/PROTOCOL.md).
 | `internal/winnet` | Windows adapter, metric, profile and firewall |
 | `internal/wire` | Packet formats of the single UDP socket |
 | `deploy/relay` | Dockerfile, compose file and `.env.example` for the relay |
-| `installer` | NSIS installer script |
+| `installer` | Inno Setup installer script and wizard artwork |
 | `scripts` | Release build, Wintun download and notices generator |
 | `docs` | Protocol, setup, self-hosting, compatibility, testing, decisions and measurements |
 | `.github/workflows` | Manual-only CI and release workflows |
@@ -83,13 +83,13 @@ go build ./...
 go test -race ./...
 ```
 
-Release build on Windows (PowerShell 5.1 or later, NSIS 3 optional, for the installer):
+Release build on Windows (PowerShell 5.1 or later; Inno Setup 6.7 or newer is optional and builds the installer):
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build-release.ps1 -Version 1.0.0
 ```
 
-The script builds all binaries with `-trimpath`, downloads and verifies `wintun.dll` (`scripts\fetch-wintun.ps1`), regenerates `THIRD_PARTY_NOTICES.md` (`go run ./scripts/gen-notices`), builds the installer and writes `SHA256SUMS` into `dist\`.
+The script builds all binaries with `-trimpath`, downloads and verifies `wintun.dll` (`scripts\fetch-wintun.ps1`), regenerates `THIRD_PARTY_NOTICES.md` (`go run ./scripts/gen-notices`), builds the installer (`installer\lanfolk.iss`) and writes `SHA256SUMS` into `dist\`. The script finds `ISCC.exe` on `PATH`, in `%USERPROFILE%\sdk\innosetup6` or in Program Files; pass `-Iscc <path>` to override. Inno Setup can be installed per user without administrator rights: `innosetup-6.x.x.exe /VERYSILENT /CURRENTUSER /NORESTART /DIR="%USERPROFILE%\sdk\innosetup6"`. When `ui\winres\winres.json` exists, the script first embeds the UI's icon and version resources with go-winres.
 
 The default relay is not stored in the repository. Create an untracked `build.env` in the repository root with the relay you want to build in (use your own values):
 

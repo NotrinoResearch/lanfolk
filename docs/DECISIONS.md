@@ -253,7 +253,7 @@ can be enabled with `RELAY_UDP_READERS`. The default stays 1, because extra
 readers did not raise throughput on the development machine and can reorder
 packets of one flow. See the load results in MEASUREMENTS.md.
 
-## D-022 The installer is a 32-bit NSIS program
+## D-022 The installer is a 32-bit NSIS program (superseded by D-026)
 
 Official NSIS builds produce 32-bit installers. The installer requires 64-bit
 Windows 10 or later and installs the 64-bit binaries into the 64-bit Program
@@ -353,3 +353,41 @@ owned network, stored with the owner's data.
 
 **Not done:** per-request approval by the owner, a per-person single-use code,
 and joining while the owner is offline (see above).
+
+## D-026 Inno Setup instead of NSIS
+
+Supersedes D-022. The installer is built with Inno Setup 6
+(`installer/lanfolk.iss`) instead of NSIS. Reasons:
+
+- `WizardStyle=modern dynamic` gives a current-looking wizard that follows the
+  Windows light or dark setting. NSIS Modern UI 2 looks dated and has no dark
+  mode.
+- It is a native 64-bit installer (`ArchitecturesInstallIn64BitMode=x64compatible`),
+  so no 32-bit installer runs in WOW64 and no file system or registry
+  redirection has to be handled by hand.
+- The wizard art is PNG with transparency and several sizes (`@2x`), chosen by
+  the display scale. NSIS needs BMP files.
+- Tasks (start with Windows, desktop shortcut, PATH), the Apps entry, upgrades
+  and the uninstaller are built in or short Pascal code; the NSIS script
+  needed hand-written logic for each.
+- New: a PATH task for the command-line tools (`lanprobe`, `natprobe`,
+  `lanfolk-cli`). Users could not run them from a shell before.
+
+Behavior is otherwise unchanged: administrator, Windows 10 or later, 64-bit
+only; `Program Files\Lanfolk`; the old UI is closed and the old service removed
+before files are replaced; `lanfolk-service install` and `start` after the
+copy (an install failure is shown, the finish page says so and the exit code is
+3; a start failure is a warning); the data folder in `ProgramData\Lanfolk` is
+kept unless the user answers Yes, and silent uninstalls always keep it. An
+install made by the NSIS installer is migrated (its Apps entry, uninstaller and
+Start Menu folder are removed). The auto-start value
+(`"Lanfolk.exe" --minimized`) is written to the HKCU of the account that runs
+the installer, as before.
+
+Inno Setup 6.7.4 was installed per user without administrator rights
+(`innosetup-6.7.4.exe /VERYSILENT /CURRENTUSER /NORESTART`) from
+`https://github.com/jrsoftware/issrc/releases/download/is-6_7_4/innosetup-6.7.4.exe`,
+the download linked from jrsoftware.org/isdl.php. The file is Authenticode
+signed (Pyrsys B.V., signature valid). SHA-256 computed on 2026-11-04:
+`A549929319F9120716677C685535CA4671E4B937B5FDC87E2585F32D8EB30E8C`.
+Dynamic dark mode needs Inno Setup 6.6 or newer.

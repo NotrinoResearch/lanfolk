@@ -6,12 +6,15 @@
 .DESCRIPTION
   Steps:
     1. Read the default relay from build.env (or the "ip" key of .env).
-    2. Build lanfolk-service, lanfolk-cli, natprobe and lanprobe for
+    2. Embed the Windows resources of the UI (icon, version, manifest) with
+       go-winres when ui\winres\winres.json exists.
+    3. Build lanfolk-service, lanfolk-cli, natprobe and lanprobe for
        windows/amd64 with -trimpath, and the desktop UI (./ui) when it exists.
-    3. Fetch and verify wintun.dll (scripts\fetch-wintun.ps1).
-    4. Generate THIRD_PARTY_NOTICES.md (scripts\gen-notices).
-    5. Build the installer with makensis when it is available.
-    6. Write a portable zip and SHA256SUMS into the output folder.
+    4. Fetch and verify wintun.dll (scripts\fetch-wintun.ps1).
+    5. Generate THIRD_PARTY_NOTICES.md (scripts\gen-notices).
+    6. Build the installer (installer\lanfolk.iss) with Inno Setup 6 (ISCC)
+       when it is available.
+    7. Write a portable zip and SHA256SUMS into the output folder.
 
   Staging folder: <repository>\build     Output folder: <repository>\dist
   Both are ignored by git.
@@ -42,8 +45,10 @@
   lanfolk-cli) with a warning instead of failing. The installer is skipped
   then, because it needs every file.
 
-.PARAMETER Makensis
-  Path to makensis.exe. Default: search PATH, ~\sdk\nsis, Program Files.
+.PARAMETER Iscc
+  Path to ISCC.exe (Inno Setup 6.7 or newer). Default: search PATH,
+  ~\sdk\innosetup6, Program Files. Install it per user without admin with
+  innosetup-6.x.x.exe /VERYSILENT /CURRENTUSER /NORESTART /DIR="%USERPROFILE%\sdk\innosetup6"
 
 .PARAMETER SignScript
   Optional script that signs one file. It is called as
@@ -59,7 +64,7 @@ param(
     [string]$Version,
     [switch]$NoDefaultRelay,
     [switch]$AllowMissing,
-    [string]$Makensis,
+    [string]$Iscc,
     [string]$SignScript
 )
 
@@ -75,6 +80,8 @@ $stage = Join-Path $repoRoot 'build'
 $dist = Join-Path $repoRoot 'dist'
 $module = 'github.com/NotrinoResearch/lanfolk'
 $ver = "$module/internal/version"
+# Pinned release of the tool that turns ui\winres\winres.json into .syso files.
+$goWinres = 'github.com/tc-hib/go-winres@v0.3.3'
 
 function Invoke-Native {
     param([string]$Exe, [string[]]$Arguments)
@@ -157,6 +164,16 @@ $oldEnv = @{ GOOS = $env:GOOS; GOARCH = $env:GOARCH; CGO_ENABLED = $env:CGO_ENAB
 $missing = @()
 Push-Location $repoRoot
 try {
+    # Windows resources of the UI (icon, version info, manifest). Runs on the
+    # host, so before GOOS/GOARCH are changed. Skipped when not configured yet.
+    $winresJson = Join-Path $repoRoot 'ui\winres\winres.json'
+    if (Test-Path -LiteralPath $winresJson) {
+        Write-Host 'Embedding Windows resources (go-winres)'
+        Invoke-Native 'go' @('run', $goWinres, 'make', '--in', 'ui/winres/winres.json', '--out', 'ui/rsrc')
+    } else {
+        Write-Host 'ui\winres\winres.json not found; building the UI without embedded resources.'
+    }
+
     $env:GOOS = 'windows'
     $env:GOARCH = 'amd64'
     $env:CGO_ENABLED = '0'
@@ -226,28 +243,30 @@ foreach ($exe in Get-ChildItem -LiteralPath $stage -Filter '*.exe') { Invoke-Sig
 $installer = Join-Path $dist "Lanfolk-$Version-setup.exe"
 if (Test-Path -LiteralPath $installer) { Remove-Item -LiteralPath $installer -Force }
 
-if (-not $Makensis) {
-    $cmd = Get-Command makensis.exe -ErrorAction SilentlyContinue
+if (-not $Iscc) {
+    $cmd = Get-Command ISCC.exe -ErrorAction SilentlyContinue
     if ($cmd) {
-        $Makensis = $cmd.Source
+        $Iscc = $cmd.Source
     } else {
         $candidates = @()
-        $candidates += @(Get-ChildItem -Path (Join-Path $env:USERPROFILE 'sdk\nsis') -Filter 'makensis.exe' -Recurse -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName })
+        if ($env:USERPROFILE) { $candidates += (Join-Path $env:USERPROFILE 'sdk\innosetup6\ISCC.exe') }
         foreach ($pf in @($env:ProgramFiles, ${env:ProgramFiles(x86)})) {
-            if ($pf) { $candidates += (Join-Path $pf 'NSIS\makensis.exe') }
+            if ($pf) { $candidates += (Join-Path $pf 'Inno Setup 6\ISCC.exe') }
         }
         foreach ($c in $candidates) {
-            if (Test-Path -LiteralPath $c) { $Makensis = $c; break }
+            if (Test-Path -LiteralPath $c) { $Iscc = $c; break }
         }
     }
 }
 if ($missing.Count -gt 0) {
     Write-Warning ("Skipping the installer: missing " + ($missing -join ', ') + '.')
-} elseif (-not $Makensis) {
-    Write-Warning 'makensis was not found; skipping the installer. Install NSIS 3 or pass -Makensis.'
+} elseif (-not $Iscc) {
+    Write-Warning 'ISCC.exe was not found; skipping the installer. Install Inno Setup 6 or pass -Iscc.'
 } else {
-    Write-Host "Building the installer with $Makensis"
-    Invoke-Native $Makensis @('-V2', "/DVERSION=$Version", "/DBUILD_DIR=$stage", "/DOUTFILE=$installer", (Join-Path $repoRoot 'installer\lanfolk.nsi'))
+    Write-Host "Building the installer with $Iscc"
+    # The output name (Lanfolk-<version>-setup.exe) is set in installer\lanfolk.iss.
+    Invoke-Native $Iscc @('/Qp', "/DVERSION=$Version", "/DBUILD_DIR=$stage", "/O$dist", (Join-Path $repoRoot 'installer\lanfolk.iss'))
+    if (-not (Test-Path -LiteralPath $installer)) { throw "ISCC did not produce $installer." }
     Invoke-Sign $installer
 }
 
