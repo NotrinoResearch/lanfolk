@@ -2,6 +2,13 @@
 .env
 *.env.local
 
+# Local release build configuration (default relay host and ports). Never commit.
+build.env
+
+# Release build output (scripts/build-release.ps1)
+/build/
+/dist/
+
 # Agent worktrees and local tool state
 .claude/worktrees/
 .claude/settings.local.json

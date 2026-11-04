@@ -1,0 +1,112 @@
+# Release build. Manual only, like ci.yml (docs/DECISIONS.md D-002): start it
+# from the Actions tab and enter the version.
+#
+# Optional repository secrets:
+#   LANFOLK_DEFAULT_RELAY_HOST      default relay host or IP injected at build time
+#   LANFOLK_DEFAULT_RELAY_UDP_PORT  default 3478
+#   LANFOLK_DEFAULT_RELAY_TCP_PORT  default 443
+#   SIGNING_CERT_BASE64             base64 of a code-signing .pfx file
+#   SIGNING_CERT_PASSWORD           password of that file
+#   SIGNING_TIMESTAMP_URL           RFC 3161 timestamp server URL
+# Without the relay secret the build has no default relay. Without the signing
+# secrets nothing is signed.
+name: release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release version, for example 1.0.0
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    env:
+      LANFOLK_VERSION: ${{ inputs.version }}
+      RELAY_HOST: ${{ secrets.LANFOLK_DEFAULT_RELAY_HOST }}
+      RELAY_UDP_PORT: ${{ secrets.LANFOLK_DEFAULT_RELAY_UDP_PORT }}
+      RELAY_TCP_PORT: ${{ secrets.LANFOLK_DEFAULT_RELAY_TCP_PORT }}
+      SIGNING_CERT_BASE64: ${{ secrets.SIGNING_CERT_BASE64 }}
+      SIGNING_CERT_PASSWORD: ${{ secrets.SIGNING_CERT_PASSWORD }}
+      SIGNING_TIMESTAMP_URL: ${{ secrets.SIGNING_TIMESTAMP_URL }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Check the version
+        shell: pwsh
+        run: |
+          if ($env:LANFOLK_VERSION -notmatch '^\d+\.\d+\.\d+$') {
+            throw "Version must look like 1.2.3, got '$env:LANFOLK_VERSION'."
+          }
+
+      - name: Test
+        shell: pwsh
+        run: go test ./...
+
+      - name: Install NSIS
+        shell: pwsh
+        run: |
+          choco install nsis --no-progress -y
+          if ($LASTEXITCODE -ne 0) { throw 'NSIS installation failed.' }
+          $nsis = Join-Path ${env:ProgramFiles(x86)} 'NSIS'
+          "$nsis" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+
+      - name: Write build.env
+        if: env.RELAY_HOST != ''
+        shell: pwsh
+        run: |
+          $udp = if ($env:RELAY_UDP_PORT) { $env:RELAY_UDP_PORT } else { '3478' }
+          $tcp = if ($env:RELAY_TCP_PORT) { $env:RELAY_TCP_PORT } else { '443' }
+          Set-Content -Path build.env -Encoding ascii -Value @(
+            "LANFOLK_DEFAULT_RELAY_HOST=$env:RELAY_HOST",
+            "LANFOLK_DEFAULT_RELAY_UDP_PORT=$udp",
+            "LANFOLK_DEFAULT_RELAY_TCP_PORT=$tcp"
+          )
+
+      # Signing is a placeholder: it runs only when the signing secrets exist.
+      # The script below is a template using signtool from the Windows SDK; it
+      # has not been tested with a real certificate yet. build-release.ps1
+      # calls it for every Lanfolk .exe and for the installer. wintun.dll is
+      # already signed by WireGuard LLC and is never signed again.
+      - name: Prepare code signing (placeholder)
+        if: env.SIGNING_CERT_BASE64 != '' && env.SIGNING_CERT_PASSWORD != '' && env.SIGNING_TIMESTAMP_URL != ''
+        shell: pwsh
+        run: |
+          $pfx = Join-Path $env:RUNNER_TEMP 'signing.pfx'
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:SIGNING_CERT_BASE64))
+          $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Recurse -Filter signtool.exe |
+            Where-Object { $_.FullName -like '*\x64\*' } | Sort-Object FullName | Select-Object -Last 1
+          if (-not $signtool) { throw 'signtool.exe was not found.' }
+          $script = Join-Path $env:RUNNER_TEMP 'sign.ps1'
+          @"
+          param([string]`$Path)
+          & '$($signtool.FullName)' sign /f '$pfx' /p `$env:SIGNING_CERT_PASSWORD /fd SHA256 /tr `$env:SIGNING_TIMESTAMP_URL /td SHA256 `$Path
+          if (`$LASTEXITCODE -ne 0) { throw "signtool failed for `$Path" }
+          "@ | Set-Content -Path $script -Encoding ascii
+          "SIGN_SCRIPT=$script" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Build
+        shell: pwsh
+        run: |
+          $buildArgs = @('-Version', $env:LANFOLK_VERSION)
+          if ($env:RELAY_HOST -eq '') {
+            Write-Warning 'No default relay secret: building without a default relay.'
+            $buildArgs += '-NoDefaultRelay'
+          }
+          if ($env:SIGN_SCRIPT) { $buildArgs += @('-SignScript', $env:SIGN_SCRIPT) }
+          & ./scripts/build-release.ps1 @buildArgs
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lanfolk-${{ inputs.version }}
+          path: dist/*
+          if-no-files-found: error
