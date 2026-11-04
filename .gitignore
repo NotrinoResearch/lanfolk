@@ -12,3 +12,7 @@ build.env
 # Agent worktrees and local tool state
 .claude/worktrees/
 .claude/settings.local.json
+
+# NAT simulation (test/natsim): Linux binaries and run output
+/test/natsim/bin/
+/test/natsim/out/
