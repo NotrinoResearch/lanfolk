@@ -30,6 +30,7 @@ func TestClassify(t *testing.T) {
 		want Class
 	}{
 		{"stun", stun.BindingRequest(stun.NewTxID()), ClassSTUN},
+		{"stun-response", stun.BindingResponse(stun.NewTxID(), netip.MustParseAddrPort("192.0.2.1:9")), ClassSTUN},
 		{"wg-init", wgInit, ClassWireGuard},
 		{"wg-data", wgData, ClassWireGuard},
 		{"wg-bad-reserved", badWG, ClassUnknown},

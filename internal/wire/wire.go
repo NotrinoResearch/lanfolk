@@ -116,6 +116,10 @@ func Classify(b []byte) Class {
 		if IsWireGuard(b) {
 			return ClassWireGuard
 		}
+		// A STUN success response starts with 0x01 too (type 0x0101).
+		if stun.IsMessage(b) {
+			return ClassSTUN
+		}
 	default:
 		if stun.IsMessage(b) {
 			return ClassSTUN

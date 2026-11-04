@@ -391,6 +391,23 @@ func (e *Engine) Diagnostics() string {
 	return string(b)
 }
 
+// OwnerSID returns the account allowed to use the control pipe.
+func (e *Engine) OwnerSID() string { return e.store.Data().OwnerSID }
+
+// ClaimOwner records sid as the pipe owner if none is recorded yet and
+// reports whether sid is the owner.
+func (e *Engine) ClaimOwner(sid string) (bool, error) {
+	owner := ""
+	err := e.store.Update(func(d *store.Data) error {
+		if d.OwnerSID == "" {
+			d.OwnerSID = sid
+		}
+		owner = d.OwnerSID
+		return nil
+	})
+	return owner == sid, err
+}
+
 func (e *Engine) publishFriends()  { e.emit(ipc.EventFriends, e.Friends()) }
 func (e *Engine) publishNetworks() { e.emit(ipc.EventNetworks, e.Networks()) }
 func (e *Engine) publishStatus()   { e.emit(ipc.EventStatus, e.Status()) }
