@@ -518,6 +518,8 @@ func (e *Engine) confirmFriend(p *peer) {
 	e.mu.Unlock()
 	e.log.Info("friendship is now active", "peer", p.displayName())
 	e.publishFriends()
+	// An invited friend joins the networks it asked for.
+	e.applyPendingMembers()
 	// The friend now gets FlagFriend in our Hello too.
 	e.sendHello(p)
 }

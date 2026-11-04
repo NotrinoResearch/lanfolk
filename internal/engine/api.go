@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/netip"
 	"runtime"
 	"sort"
 	"strings"
@@ -188,7 +189,12 @@ func (e *Engine) Peers() []ipc.Peer {
 	e.mu.Unlock()
 	out := make([]ipc.Peer, 0, len(peers))
 	for _, p := range peers {
-		ip := ipc.Peer{PublicKey: p.key.Hex(), Nickname: p.displayName(), VirtualIP: p.vip.String(),
+		// vip is written under e.mu by reconcile; read the lock-free copy.
+		var vip netip.Addr
+		if v := p.vipp.Load(); v != nil {
+			vip = *v
+		}
+		ip := ipc.Peer{PublicKey: p.key.Hex(), Nickname: p.displayName(), VirtualIP: vip.String(),
 			Online: p.online(now, e.cfg.OfflineAfter), Path: "none", Quality: pathmgr.QualityUnknown.String()}
 		if v := p.active.Load(); v != nil {
 			ip.Path = v.kind.String()
@@ -608,6 +614,36 @@ func (e *Engine) Handle(ctx context.Context, method string, params json.RawMessa
 		}
 		pk, err := e.UseConnCode(p.Code)
 		return ipc.KeyParams{PublicKey: pk.Hex()}, mapErr(err)
+	case ipc.MethodCreateInvite:
+		var p ipc.InviteParams
+		if err := ipc.Decode(params, &p); err != nil {
+			return nil, err
+		}
+		id, err := parseNetID(p.NetworkID)
+		if err != nil {
+			return nil, err
+		}
+		code, exp, err := e.CreateInvite(id, p.Reset)
+		return ipc.InviteResult{Code: code, Expires: exp}, mapErr(err)
+	case ipc.MethodRedeemInvite:
+		var p ipc.CodeParams
+		if err := ipc.Decode(params, &p); err != nil {
+			return nil, err
+		}
+		res, err := e.RedeemInvite(p.Code)
+		return res, mapErr(err)
+	case ipc.MethodListInvites:
+		return e.PendingJoins(), nil
+	case ipc.MethodCancelInvite:
+		var p ipc.NetworkParams
+		if err := ipc.Decode(params, &p); err != nil {
+			return nil, err
+		}
+		id, err := parseNetID(p.NetworkID)
+		if err != nil {
+			return nil, err
+		}
+		return true, mapErr(e.CancelJoin(id))
 	case ipc.MethodExportDiagnostics:
 		return ipc.DiagnosticsResult{Report: e.Diagnostics()}, nil
 	}

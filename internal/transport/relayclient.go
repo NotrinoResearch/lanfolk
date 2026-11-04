@@ -168,6 +168,17 @@ func (c *RelayClient) Unregister(sid wire.SessionID) {
 	}
 }
 
+// Refresh registers sid again at once instead of at the next refresh time.
+// A session the relay rejected (SessionFull) gets another try this way.
+func (c *RelayClient) Refresh(sid wire.SessionID) {
+	c.mu.Lock()
+	if s := c.sessions[sid]; s != nil {
+		s.lastSent = time.Time{}
+	}
+	c.mu.Unlock()
+	c.wake()
+}
+
 func (c *RelayClient) wake() {
 	select {
 	case c.kick <- struct{}{}:

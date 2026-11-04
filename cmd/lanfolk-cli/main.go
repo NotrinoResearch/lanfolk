@@ -32,6 +32,11 @@ const usageText = `usage: lanfolk-cli [-json] [-pipe PATH] <command> [arguments]
   networks relays <network> [host:udp[:tcp] ...]  set your network's relays
   networks activate <network>|none     choose the active network
   networks leave <network>             leave (or, as owner, delete) a network
+  invite <network> [reset]             show the invite code of your network
+                                       (reset makes a new one and voids the old)
+  join <code>                          join a network with an invite code
+  join                                 list invites you are using
+  join cancel <network>                stop waiting for an invite
   peers [-watch]                       live connection data per member
   settings                             show settings
   settings set key=value ...           relay_only, compat_mode, manual_port,
@@ -139,6 +144,10 @@ func run(ctx context.Context, c *ipc.Client, a []string) error {
 		}
 	case "networks":
 		return networks(ctx, c, a[1:])
+	case "invite":
+		return inviteCmd(ctx, c, a[1:])
+	case "join":
+		return joinCmd(ctx, c, a[1:])
 	case "peers":
 		if arg(1) == "-watch" {
 			return watchPeers(ctx, c)
@@ -565,4 +574,95 @@ func password() (string, error) {
 		return "", errors.New("no password given (set LANFOLK_PASSWORD)")
 	}
 	return p, nil
+}
+
+func inviteCmd(ctx context.Context, c *ipc.Client, a []string) error {
+	if len(a) == 0 || (len(a) > 1 && a[1] != "reset") {
+		return errors.New("usage: invite <network> [reset]")
+	}
+	n, err := resolveNetwork(ctx, c, a[0])
+	if err != nil {
+		return err
+	}
+	var r ipc.InviteResult
+	if err := c.Call(ctx, ipc.MethodCreateInvite, ipc.InviteParams{NetworkID: n.ID, Reset: len(a) > 1}, &r); err != nil {
+		return err
+	}
+	if jsonOut {
+		printJSON(r)
+		return nil
+	}
+	fmt.Printf("%s\n(valid until %s; anyone with the code can join %q while you are online)\n",
+		r.Code, r.Expires.Local().Format("2006-01-02 15:04"), n.Name)
+	return nil
+}
+
+func joinCmd(ctx context.Context, c *ipc.Client, a []string) error {
+	switch {
+	case len(a) == 0:
+		var js []ipc.PendingJoin
+		if err := c.Call(ctx, ipc.MethodListInvites, nil, &js); err != nil {
+			return err
+		}
+		if jsonOut {
+			printJSON(js)
+			return nil
+		}
+		if len(js) == 0 {
+			fmt.Println("No invites in progress.")
+			return nil
+		}
+		w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
+		fmt.Fprintln(w, "NETWORK\tOWNER\tSTATE\tEXPIRES")
+		for _, j := range js {
+			name := j.NetworkName
+			if name == "" {
+				name = j.NetworkID[:8]
+			}
+			owner := j.OwnerNickname
+			if owner == "" {
+				owner = j.OwnerPublicKey[:8]
+			}
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", name, owner, joinStateText(j), j.Expires.Local().Format("2006-01-02 15:04"))
+		}
+		return w.Flush()
+	case a[0] == "cancel":
+		if len(a) < 2 {
+			return errors.New("usage: join cancel <network>")
+		}
+		var js []ipc.PendingJoin
+		if err := c.Call(ctx, ipc.MethodListInvites, nil, &js); err != nil {
+			return err
+		}
+		for _, j := range js {
+			if j.NetworkID == a[1] || strings.HasPrefix(j.NetworkID, strings.ToLower(a[1])) || strings.EqualFold(j.NetworkName, a[1]) {
+				return c.Call(ctx, ipc.MethodCancelInvite, ipc.NetworkParams{NetworkID: j.NetworkID}, nil)
+			}
+		}
+		return fmt.Errorf("no invite in progress for %q", a[1])
+	}
+	var r ipc.RedeemResult
+	if err := c.Call(ctx, ipc.MethodRedeemInvite, ipc.CodeParams{Code: strings.Join(a, "")}, &r); err != nil {
+		return err
+	}
+	if jsonOut {
+		printJSON(r)
+		return nil
+	}
+	fmt.Println("Invite accepted. You join as soon as the network owner is online; check progress with: join")
+	return nil
+}
+
+func joinStateText(j ipc.PendingJoin) string {
+	switch j.State {
+	case ipc.JoinWaiting:
+		return "waiting for the owner to come online"
+	case ipc.JoinJoining:
+		return "joining"
+	case ipc.JoinJoined:
+		return "joined"
+	case ipc.JoinExpired:
+		return "expired"
+	}
+	return j.State
 }

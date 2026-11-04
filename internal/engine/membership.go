@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/NotrinoResearch/lanfolk/internal/identity"
+	"github.com/NotrinoResearch/lanfolk/internal/invite"
 	"github.com/NotrinoResearch/lanfolk/internal/network"
 	"github.com/NotrinoResearch/lanfolk/internal/peermsg"
 	"github.com/NotrinoResearch/lanfolk/internal/store"
@@ -244,6 +245,7 @@ func (e *Engine) acceptList(l *network.List, from *peer) error {
 		e.activateLocked(l)
 		e.saveListsLocked()
 	}
+	e.noteJoinedLocked(l)
 	// Gossip to members that may have an older list (owner offline case).
 	go e.pushList(l, nil)
 	return nil
@@ -311,6 +313,13 @@ func (e *Engine) LeaveNetwork(id network.ID) error {
 		e.deactivateLocked()
 	}
 	delete(e.lists, id)
+	if e.pending[id] != nil || e.owned[id] != (invite.Code{}) {
+		delete(e.pending, id)
+		delete(e.owned, id)
+		e.saveInvitesLocked()
+		e.syncInvitesLocked()
+		go e.publishInvites()
+	}
 	go e.publishNetworks()
 	return e.saveListsLocked()
 }
