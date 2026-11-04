@@ -61,14 +61,17 @@ func (e *Engine) collectCandidates() []candidate {
 		for _, r := range *rs {
 			if o := r.client.Observed(); o.IsValid() {
 				add(o, pathmgr.SourceSTUN)
-				if e.settings.ManualPort > 0 {
-					add(netip.AddrPortFrom(o.Addr(), uint16(e.settings.ManualPort)), pathmgr.SourceManual)
+				if mp := e.manualPortA.Load(); mp > 0 {
+					add(netip.AddrPortFrom(o.Addr(), uint16(mp)), pathmgr.SourceManual)
 				}
 			}
 		}
 	}
-	if e.portmap != nil {
-		if m, ok := e.portmap.m.Current(); ok {
+	e.mu.Lock()
+	pm := e.portmap
+	e.mu.Unlock()
+	if pm != nil {
+		if m, ok := pm.m.Current(); ok {
 			add(m.External, pathmgr.SourcePortMap)
 		}
 	}
@@ -147,7 +150,10 @@ type portMapper struct {
 }
 
 func startPortMapper(ctx context.Context, e *Engine) *portMapper {
-	if !e.settings.PortMapping {
+	e.mu.Lock()
+	enabled := e.settings.PortMapping
+	e.mu.Unlock()
+	if !enabled {
 		return nil
 	}
 	m := portmap.New(e.sock.Port(), portmap.Options{Logger: e.log.With("component", "portmap")})

@@ -191,7 +191,7 @@ func (e *Engine) maybeSendCandidates(p *peer, now time.Time) {
 }
 
 func (e *Engine) onCandidates(p *peer, m *peermsg.Candidates) {
-	if e.settings.RelayOnly {
+	if e.relayOnly() {
 		return
 	}
 	now := nanotime()

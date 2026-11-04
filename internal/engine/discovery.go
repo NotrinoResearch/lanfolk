@@ -32,13 +32,13 @@ func newDHTFallback(e *Engine) *dhtFallback {
 }
 
 // State reports "off", "standby" or "running".
-func (d *dhtFallback) state() string {
+func (d *dhtFallback) state(enabled bool) string {
 	if d == nil {
 		return "off"
 	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	if !d.e.settings.DHTFallback {
+	if !enabled {
 		return "off"
 	}
 	if d.dht != nil {

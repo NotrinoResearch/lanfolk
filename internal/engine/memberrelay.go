@@ -34,7 +34,7 @@ func directActive(p *peer) (netip.AddrPort, time.Duration, bool) {
 // onMemberForward handles 0xF3: a member asks us to relay to another member.
 func (e *Engine) onMemberForward(b []byte, from netip.AddrPort) {
 	sid, target, payload, ok := wire.ParseMemberFrame(b)
-	if !ok || e.settings.RelayOnly {
+	if !ok || e.relayOnly() {
 		return
 	}
 	src := e.peerBySID(sid)
@@ -107,7 +107,7 @@ func (e *Engine) onMemberDeliver(b []byte, from netip.AddrPort) {
 // sendRelayOffers tells each directly connected member which other members
 // we reach directly, so that members without a direct path can use us.
 func (e *Engine) sendRelayOffers(now time.Time) {
-	if e.settings.RelayOnly {
+	if e.relayOnly() {
 		return
 	}
 	e.mu.Lock()
@@ -144,7 +144,7 @@ func (e *Engine) sendRelayOffers(now time.Time) {
 // onRelayOffer adds member relay paths through the offering member.
 func (e *Engine) onRelayOffer(relayer *peer, m *peermsg.RelayOffer) {
 	viaAddr, _, ok := directActive(relayer)
-	if !ok || e.settings.RelayOnly {
+	if !ok || e.relayOnly() {
 		return
 	}
 	now := nanotime()

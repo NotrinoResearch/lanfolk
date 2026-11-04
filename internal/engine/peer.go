@@ -379,7 +379,7 @@ func (e *Engine) onControlFrom(p *peer, b []byte, v via) {
 	}
 	p.lastAuth = now
 	learned := false
-	if v.kind == pathmgr.Direct && p.pm != nil && !e.settings.RelayOnly {
+	if v.kind == pathmgr.Direct && p.pm != nil && !e.relayOnly() {
 		if id, ok := p.pm.FindDirect(v.addr); ok {
 			v.pathID = id
 		} else if id, fresh := p.pm.AddDirect(v.addr, pathmgr.SourcePeerReflexive, nanotime()); fresh {

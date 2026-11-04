@@ -99,6 +99,9 @@ type Engine struct {
 	relayLimiter relayLimiter
 	nick         string
 	settings     store.Settings
+	// Lock-free copies of settings read on the packet path.
+	relayOnlyA  atomic.Bool
+	manualPortA atomic.Int32
 
 	byKey   atomic.Pointer[map[identity.PublicKey]*peer]
 	bySID   atomic.Pointer[map[wire.SessionID]*peer]
@@ -147,6 +150,7 @@ func New(cfg Config) (*Engine, error) {
 	}
 	d := st.Data()
 	e.settings = d.Settings
+	e.syncSettingsCopies()
 	e.nick = d.Identity.Nickname
 	for _, n := range d.Networks {
 		l, err := network.Unmarshal(n.SignedList)
@@ -164,6 +168,9 @@ func New(cfg Config) (*Engine, error) {
 	}
 	e.bind = transport.NewBind(e, e.sock.Port())
 	e.storeMaps()
+	if !cfg.DisableDHT {
+		e.dht = newDHTFallback(e)
+	}
 	return e, nil
 }
 
@@ -256,10 +263,10 @@ func (e *Engine) Run(ctx context.Context) error {
 	e.wg.Add(1)
 	go func() { defer e.wg.Done(); e.sock.Run(e.onPacket) }()
 	if !e.cfg.DisablePortMapping {
-		e.portmap = startPortMapper(ctx, e)
-	}
-	if !e.cfg.DisableDHT {
-		e.dht = newDHTFallback(e)
+		pm := startPortMapper(ctx, e)
+		e.mu.Lock()
+		e.portmap = pm
+		e.mu.Unlock()
 	}
 	e.loop(ctx)
 	e.shutdown()
@@ -419,6 +426,15 @@ func (e *Engine) rebuildAddrMap() {
 	}
 	e.byAddr.Store(&m)
 }
+
+// syncSettingsCopies refreshes the lock-free setting copies; call it after
+// e.settings changes.
+func (e *Engine) syncSettingsCopies() {
+	e.relayOnlyA.Store(e.settings.RelayOnly)
+	e.manualPortA.Store(int32(e.settings.ManualPort))
+}
+
+func (e *Engine) relayOnly() bool { return e.relayOnlyA.Load() }
 
 func (e *Engine) emit(event string, data any) {
 	if e.cfg.OnEvent != nil {

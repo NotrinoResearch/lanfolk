@@ -235,6 +235,7 @@ func (e *Engine) Status() ipc.Status {
 		st.Warnings = append(st.Warnings, "no relay is configured; add one in Settings")
 	}
 	pm := e.portmap
+	dhtEnabled := e.settings.DHTFallback
 	e.mu.Unlock()
 	if pm != nil {
 		if m, ok := pm.m.Current(); ok {
@@ -243,7 +244,7 @@ func (e *Engine) Status() ipc.Status {
 	}
 	st.DHT = "off"
 	if e.dht != nil {
-		st.DHT = e.dht.state()
+		st.DHT = e.dht.state(dhtEnabled)
 	}
 	if runtime.GOOS == "windows" && st.AdapterError != "" {
 		st.Warnings = append(st.Warnings, "the virtual adapter is not available: "+st.AdapterError)
@@ -297,6 +298,7 @@ func (e *Engine) SetSettings(s ipc.Settings) (ipc.Settings, error) {
 	e.mu.Lock()
 	relayOnlyChanged := e.settings.RelayOnly != s.RelayOnly
 	e.settings = e.store.Data().Settings
+	e.syncSettingsCopies()
 	if relayOnlyChanged {
 		cfg := e.pathConfig()
 		for _, p := range e.peers {
