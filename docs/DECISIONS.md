@@ -391,3 +391,54 @@ the download linked from jrsoftware.org/isdl.php. The file is Authenticode
 signed (Pyrsys B.V., signature valid). SHA-256 computed on 2026-11-04:
 `A549929319F9120716677C685535CA4671E4B937B5FDC87E2585F32D8EB30E8C`.
 Dynamic dark mode needs Inno Setup 6.6 or newer.
+
+## D-027 Desktop UI: compact main window, separate Settings window, tray, brand
+
+Date: 2026-11-04. Replaces the first desktop UI (a 1100 x 720 window with a
+sidebar and every setting on screen), which the product owner found
+intimidating.
+
+**Decision**
+
+- **Main window**, 380 x 640, frameless with the native shadow, rounded
+  corners and snap layouts (Wails `Frameless` with decorations kept). It shows
+  state only: an identity card (power button, status, copyable virtual IP),
+  Networks and Friends tabs, live member rows and a Create / Join bar.
+  Closing it hides it to the tray; `--minimized` starts it hidden (the Run
+  value written by the installer and by "Open at sign-in").
+- **Settings window**: the same executable started with `--settings`, with a
+  Windows 11 style category sidebar. Wails v2 supports one window per
+  process, so a second process is the only way to get a real second window
+  without moving to Wails v3 (alpha). Cost: about 50-80 MB while Settings is
+  open. Both windows talk to the service, so they stay in sync through its
+  events; each has its own single-instance lock.
+- **Rows are informational; actions are in menus.** Selecting a member or
+  friend extends the row with a readout; copy, remove and "add to network"
+  are in the row menu (⋯, right click, Shift+F10). An earlier inline card
+  with buttons read as a separate control.
+- **Tray**: `fyne.io/systray` (Apache-2.0) on its own locked OS thread (its
+  window and message loop live on that thread). Four icon states (online,
+  connecting, offline, attention), a menu with status, copy IP, network
+  switch, invite, Settings and Quit. Win32 popup menus opt into dark mode
+  through uxtheme ordinals 135/136 (Windows 10 1903+). The library loads
+  icons at the default (32 px) size and lets the shell scale them, so every
+  tray frame is drawn with the small-size geometry.
+- **Onboarding** asks only for a name; joining uses the invite code of D-025.
+- **Brand**: the mark is four nodes on a diamond joined by three links that
+  stop short of the nodes; the green node is "you", the missing link is the
+  open seat an invite fills. Cobalt `#2F5BEA` and signal green `#14C38E`.
+  Everything is generated from code (`scripts/brand/build.mjs`; wordmark in
+  Geist SemiBold, OFL, outlined). Literal, mascot and AI-generated concepts
+  were shown and rejected; see `assets/brand/README.md`. Visual rules are in
+  `DESIGN.md`.
+- **UI language**: English only for now; strings stay in `app.js` and the
+  Inno Setup `[Messages]`, ready to extract.
+- **Automation build** (`-tags automation`, `scripts/dev/ui.mjs`): a loopback
+  API with a random token to run JavaScript in the page, capture the window
+  and drive the tray, for scripted UI checks. Release builds use
+  `-tags desktop,production,nomock` and contain neither the automation API
+  nor the `-mock` preview service.
+
+**Not done**: Mica window material (a transparent window would render badly
+on Windows 10; the flat `#f3f3f3` / `#202020` grounds match Mica's tone),
+notifications when a member comes online, and a UI translation.

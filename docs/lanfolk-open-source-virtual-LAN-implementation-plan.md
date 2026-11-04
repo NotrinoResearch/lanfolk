@@ -587,6 +587,7 @@ Deviations and decisions so far. See [DECISIONS.md](DECISIONS.md) for details.
 | D-024 | Development | Service flags for running several instances on one machine |
 | D-025 | Onboarding | One `lanfolk-i1` invite code replaces the friend-code exchange and manual add; rendezvous in a relay session derived from the code's token, owner must be online, bearer token with 7-day expiry and reset |
 | D-026 | Installer | Inno Setup 6 instead of NSIS: modern dynamic wizard, native 64-bit, PNG art, PATH task |
+| D-027 | Desktop UI | Compact main window with tray, separate Settings window process, row menus, brand generated from code, automation build |
 
 ## Test plan
 

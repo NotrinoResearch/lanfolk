@@ -4,6 +4,13 @@ Lanfolk is an open-source virtual LAN for playing LAN games with friends over th
 
 Lanfolk is not a VPN for your internet traffic: only traffic to the virtual network `10.77.0.0/24` goes through it. It does not share files or printers.
 
+<p align="center">
+  <img src="docs/images/main-window.png" width="300" alt="The Lanfolk window: your status and IP address, a network with four members, their ping and connection type">
+  &nbsp;
+  <img src="docs/images/settings-window.png" width="520" alt="The Lanfolk Settings window on the Relays page">
+</p>
+<p align="center"><sub>Preview with sample data (<code>Lanfolk.exe -mock</code>).</sub></p>
+
 ## Status
 
 **Under active development. There is no release yet.**
@@ -22,8 +29,9 @@ What is still open: tests that need administrator rights, two Windows machines a
 When a release is available:
 
 1. Download the installer from the GitHub Releases page and run it (Windows 10 or 11, 64-bit).
-2. Open Lanfolk, choose a nickname, and exchange friend codes with your friends.
-3. Create a network, add your friends, and start your game on the LAN.
+2. Open Lanfolk and choose a nickname.
+3. One of you creates a network and sends the invite code; the others choose **Join network** and paste it.
+4. Start your game and look for the others in its LAN browser.
 
 The full guide is [docs/SETUP.md](docs/SETUP.md). If a game does not find the other players, see its troubleshooting section and [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md).
 

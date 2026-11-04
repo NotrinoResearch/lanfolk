@@ -19,3 +19,6 @@ build.env
 
 # go-winres output (scripts/build-release.ps1 generates it)
 ui/rsrc_*.syso
+
+# impeccable skill working files (only DESIGN.md and .impeccable/design.json are kept)
+.impeccable/questions/

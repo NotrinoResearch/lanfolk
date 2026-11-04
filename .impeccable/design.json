@@ -1,0 +1,16 @@
+{
+  "schema": 1,
+  "source": "DESIGN.md",
+  "shadows": {
+    "floating-light": "0 8px 24px rgba(0,0,0,0.14), 0 2px 6px rgba(0,0,0,0.08)",
+    "floating-dark": "0 8px 28px rgba(0,0,0,0.5), 0 2px 6px rgba(0,0,0,0.3)"
+  },
+  "motion": {
+    "state-change": "120-160ms ease-out",
+    "toggle-knob": "160ms cubic-bezier(0.2, 0.8, 0.2, 1)",
+    "menu-pop": "120ms ease-out",
+    "reduced-motion": "all durations 1ms; spinner stops"
+  },
+  "focus": "2px solid text colour, 1px offset, 5px radius",
+  "direction": { "form": "canon (Windows 11 utility)", "seed": "seed:f420d7568bfc2972" }
+}
