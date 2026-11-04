@@ -52,6 +52,24 @@ Last updated: 4 November 2026.
 - [ ] Upgrade 0.2.1 to 0.3.0 over the top on a machine with a network and
       friends; everything must still be there.
 
+## Release 0.4.0
+
+- [x] Upgrade 0.3.1 to 0.4.0 over the top (4 November): identity, friend
+      code and network kept; the CLI and app connect to the new control pipe
+      as the installing user; the data folder is no longer readable for a
+      normal user; the diagnostic report hides the friend code and shortens
+      public addresses; the Troubleshooting switch for Windows services shows
+      Off.
+- [x] The shared relay runs 0.2.0 (D-033); a 0.3.1 client registers over
+      UDP as before.
+- [ ] Two homes with 0.4.0 on both sides: a game works (Minecraft Java LAN,
+      a broadcast game), TCP 7680 (a Windows service) is unreachable while a
+      desktop listener is reachable, and `Tunnel.DroppedService` counts the
+      attempt (docs/TESTING.md).
+- [ ] Remove a member who joined with an invite: the old code stops working
+      and, after about 90 s, the friendship that only the invite created is
+      gone on both sides.
+
 ## Installer
 
 - [ ] Install, upgrade and uninstall on a clean Windows 10 (64-bit). Only
