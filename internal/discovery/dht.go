@@ -230,3 +230,25 @@ func (d *DHT) Close() {
 	d.srv.Close()
 	d.conn.Close()
 }
+
+// Ready is closed when the initial bootstrap has finished.
+func (d *DHT) Ready() <-chan struct{} { return d.ready }
+
+// LinkLocalNetwork adds every node to every other node's routing table. It
+// is meant for private DHT networks in tests: real nodes hand out only
+// peers they have verified, which takes minutes on a fresh network.
+func LinkLocalNetwork(nodes []*DHT) error {
+	for i, a := range nodes {
+		for j, b := range nodes {
+			if i == j {
+				continue
+			}
+			ap := b.Addr()
+			if err := a.srv.AddNode(krpc.NodeInfo{ID: b.srv.ID(),
+				Addr: krpc.NodeAddr{IP: ap.Addr().AsSlice(), Port: int(ap.Port())}}); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}

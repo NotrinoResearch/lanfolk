@@ -11,8 +11,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/NotrinoResearch/lanfolk/internal/discovery"
 	"github.com/NotrinoResearch/lanfolk/internal/identity"
 	"github.com/NotrinoResearch/lanfolk/internal/ipc"
+	"github.com/NotrinoResearch/lanfolk/internal/pathmgr"
 	"github.com/NotrinoResearch/lanfolk/internal/relay"
 	"github.com/NotrinoResearch/lanfolk/internal/store"
 	"github.com/NotrinoResearch/lanfolk/internal/transport"
@@ -49,6 +51,7 @@ func (r *testRelay) stop() {
 type node struct {
 	t      *testing.T
 	name   string
+	dir    string
 	e      *Engine
 	cancel context.CancelFunc
 	done   chan struct{}
@@ -58,14 +61,20 @@ type node struct {
 
 func newNode(t *testing.T, name string, r *testRelay) *node {
 	t.Helper()
-	n := &node{t: t, name: name, done: make(chan struct{})}
+	return newNodeIn(t, name, r, t.TempDir(), nil)
+}
+
+// newNodeIn starts a node on an existing data directory (restarts).
+func newNodeIn(t *testing.T, name string, r *testRelay, dir string, mod func(*Config)) *node {
+	t.Helper()
+	n := &node{t: t, name: name, dir: dir, done: make(chan struct{})}
 	level := slog.LevelWarn
 	if os.Getenv("LANFOLK_TEST_LOG") != "" {
 		level = slog.LevelDebug
 	}
 	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level})).With("node", name)
 	cfg := Config{
-		DataDir:    t.TempDir(),
+		DataDir:    dir,
 		Logger:     log,
 		ListenAddr: "127.0.0.1:0",
 		NewTUN: func(string, int) (tun.Device, error) {
@@ -89,6 +98,9 @@ func newNode(t *testing.T, name string, r *testRelay) *node {
 			o.RegisterInterval = time.Second
 		},
 	}
+	if mod != nil {
+		mod(&cfg)
+	}
 	e, err := New(cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -107,6 +119,16 @@ func newNode(t *testing.T, name string, r *testRelay) *node {
 func (n *node) stop() {
 	n.cancel()
 	<-n.done
+}
+
+// stopOnce stops a node that may already have been stopped.
+func (n *node) stopped() bool {
+	select {
+	case <-n.done:
+		return true
+	default:
+		return false
+	}
 }
 
 func (n *node) code() string { return n.e.PublicKey().FriendCode() }
@@ -512,4 +534,83 @@ func (n *node) drain() {
 			return
 		}
 	}
+}
+
+func startPrivateDHT(t *testing.T, n int) []string {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	var nodes []*discovery.DHT
+	for i := 0; i < n; i++ {
+		opts := discovery.DHTOptions{Addr: "127.0.0.1:0", NoBootstrapDefaults: true, Serve: true}
+		if i > 0 {
+			opts.Bootstrap = []string{nodes[0].Addr().String()}
+		}
+		d, err := discovery.StartDHT(ctx, opts)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(d.Close)
+		<-d.Ready()
+		nodes = append(nodes, d)
+	}
+	if err := discovery.LinkLocalNetwork(nodes); err != nil {
+		t.Fatal(err)
+	}
+	var addrs []string
+	for _, d := range nodes {
+		addrs = append(addrs, d.Addr().String())
+	}
+	return addrs
+}
+
+// The Phase 6 gate: with the shared relay down, the DHT reconnects members.
+// After a restart both members listen on new ports, so their cached
+// addresses are stale and only the DHT can tell them where to go.
+func TestDHTReconnectsWhenRelayIsDown(t *testing.T) {
+	r := startTestRelay(t)
+	a, b := newNode(t, "ahmet", r), newNode(t, "mehmet", r)
+	befriend(t, a, b)
+	createNetwork(t, a, b)
+	sendUntil(t, a, b, 9000, []byte("before the outage"))
+	a.stop()
+	b.stop()
+	r.stop()
+
+	bootstrap := startPrivateDHT(t, 5)
+	withDHT := func(c *Config) {
+		c.DisableDHT = false
+		c.DHTBootstrap = bootstrap
+		c.DHTAfter = time.Second
+	}
+	a2 := newNodeIn(t, "ahmet", r, a.dir, withDHT)
+	b2 := newNodeIn(t, "mehmet", r, b.dir, withDHT)
+	waitFor(t, 20*time.Second, "DHT fallback to start", func() bool {
+		return a2.e.Status().DHT == "running" && b2.e.Status().DHT == "running"
+	})
+	waitFor(t, 60*time.Second, "direct path found through the DHT", func() bool {
+		return a2.peer(b2).Path == "direct" && b2.peer(a2).Path == "direct"
+	})
+	sendUntil(t, a2, b2, 9001, []byte("found through the DHT"))
+	if !hasSource(a2, b2, pathmgr.SourceDHT) && !hasSource(b2, a2, pathmgr.SourceDHT) {
+		t.Fatal("the direct path was not learned from the DHT")
+	}
+}
+
+func hasSource(n, other *node, src pathmgr.Source) bool {
+	p := n.e.peerByKey(other.e.PublicKey())
+	if p == nil {
+		return false
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.pm == nil {
+		return false
+	}
+	for _, pi := range p.pm.Paths(0) {
+		if pi.Source == src {
+			return true
+		}
+	}
+	return false
 }
