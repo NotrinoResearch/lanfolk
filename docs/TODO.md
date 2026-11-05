@@ -128,7 +128,17 @@ Last updated: 5 November 2026.
       November with a running `lanprobe serve`). Lab VM: 0.4.3 to 0.4.4 with
       `lanprobe serve` running succeeded; a setup forced to fail on a locked
       file rolled back and registered and started the service again.
-- [ ] Short game test with osman on 0.4.4.
+- [x] Short game test with osman on 0.4.4 (5 November): the session was
+      listed and the game worked between the two homes.
+
+## Release 0.4.5
+
+- [x] Starting Lanfolk while the running app is frozen opens it again
+      (D-040). Reproduced with 0.4.4 by suspending a running Lanfolk.exe: a
+      new start stayed without a window. With 0.4.5 on this machine (5
+      November): the frozen main window and a frozen Settings window were
+      replaced within the 5 s check; with a responsive app a new start still
+      showed the running window and exited (0.4 s).
 
 ## Release 0.5.0: connection resilience
 
