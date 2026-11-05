@@ -108,8 +108,12 @@ Last updated: 5 November 2026.
 - [x] Reproduce it without a second person: Hyper-V lab VM behind a fake
       UPnP router (LanfolkLab, outside the repository), validated with
       Commandos 2 (list and join) before and after the change.
-- [ ] Ship D-038, then a short game test with osman (he only installs the
-      update; nothing to change on his side).
+- [x] Ship D-038. Upgraded the lab VM from 0.4.2 silently (5 November):
+      identity and network kept, no restart asked, the service turned
+      DirectPlay's UPnP off by itself; Commandos 2 behind the fake UPnP
+      router listed and joined a session with the installed release build.
+- [ ] Short game test with osman on 0.4.3 (he only installs the update;
+      nothing to change on his side).
 - [ ] Put the lab VM and the fake router into TESTING.md and a script, so
       the UPnP case is part of the matrix.
 
