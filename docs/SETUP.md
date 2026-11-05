@@ -54,6 +54,11 @@ your IP address, switch network, invite friends, Settings, Quit). The icon
 shows the state: blue with a green node when you are connected, an amber ring
 while connecting, gray when you are not in a network.
 
+**Quit Lanfolk** closes only the app; the Lanfolk service keeps you online in
+the background. **Turn off Lanfolk** closes the app and stops the service as
+well, so nothing of Lanfolk runs. It starts again the next time Windows starts
+(and the app too, if it starts when you sign in), or when you open Lanfolk.
+
 If the app says it cannot reach the service, see [Troubleshooting](#troubleshooting).
 
 Back up your identity once: **Settings, Identity and backup, Back up**. If you

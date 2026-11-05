@@ -278,7 +278,7 @@
   function offlineHTML() {
     return '<div class="empty mute" data-key="offline">' + mark(56) +
       '<h2>The Lanfolk service is not running</h2>' +
-      '<p>It normally starts with Windows. If it does not come back, restart the computer; if that does not help, install Lanfolk again. Your networks and friends are kept.' +
+      '<p>Choose Try again to start it. It also starts with Windows. If it does not start, restart the computer; if that does not help, install Lanfolk again. Your networks and friends are kept.' +
       (S.service.message ? ' ' + esc(S.service.message) : '') + '</p>' +
       '<div class="stack"><button type="button" class="btn" data-action="retry"' + attr('disabled', S.busy.retry) + '>' +
       (S.busy.retry ? '<span class="spinner sm" aria-hidden="true"></span>Trying…' : icon('refresh') + 'Try again') + '</button></div>' +

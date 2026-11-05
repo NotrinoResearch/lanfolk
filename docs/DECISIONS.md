@@ -806,3 +806,48 @@ was listed and the join reached both lobbies. Turning the network off
 restored the account's value, and turning it on again set it to 2. Unit tests
 cover unset and set values, a restart in between, a value changed by the
 user, a reset while active and a signed-out account.
+
+## D-039 Turn off Lanfolk from the tray
+
+Date: 2026-11-05.
+
+"Quit Lanfolk" closes only the app; the service keeps the member online.
+Users who care about what runs on their computer asked for one step that
+stops everything. The tray menu now has **Turn off Lanfolk** below Quit.
+
+Decision:
+
+- The app asks the service to stop over the control pipe
+  (`service.shutdown`). Only the owner and administrators reach it, like
+  every other method. The service replies, then stops 200 ms later: `serve`
+  returns without an error and the service reports a clean stop with exit
+  code 0, which Windows' recovery actions (restart on failure) ignore. On
+  the way out it leaves the network and restores DirectPlay's setting
+  (D-038). The app then closes the Settings window and quits. If the
+  service cannot be stopped, the app stays open and shows a notification.
+- Nothing about starting changes: the service stays an automatic service
+  and the "start when I sign in" value of the app is not touched, so both
+  start again when Windows starts.
+- Opening Lanfolk turns it on again: the main window starts a stopped
+  service once when it cannot connect at launch, and the "Try again" button
+  of the "service is not running" screen starts it too. For that the
+  service's DACL lets interactive users start it (`RP`); stopping and
+  changing it stay with administrators and LocalSystem. An auto-start
+  service that users can start gains nothing they could not get by
+  restarting Windows. Installs before 0.4.4 lack this right until they are
+  upgraded (setup registers the service again on every upgrade).
+
+Rejected:
+
+- Stopping through the service manager from the app: users would need the
+  right to stop the service, which also lets any signed-in user cut a
+  running game off, without the owner check of the control pipe.
+- Setting the service to manual start while it is off: it would have to be
+  undone on the next start and contradicts "starts with Windows".
+
+Also in this change, a failed upgrade no longer leaves Lanfolk without its
+service. Setup removed the old service before copying files; when a file was
+in use (a running `lanprobe serve` was seen) Setup rolled back but the
+service stayed removed. Setup now ends Lanfolk's command-line tools with the
+app, and when it fails or is cancelled after removing the service it
+registers and starts the service of the files that remain.

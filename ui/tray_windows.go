@@ -41,9 +41,9 @@ type tray struct {
 	statePath string
 	noticeQ   chan notice
 
-	updateItem, status, copyIP, open, network, disconnect, invite, settings, quit *systray.MenuItem
-	slots                                                                         [maxTrayNetworks]*systray.MenuItem
-	slotIDs                                                                       [maxTrayNetworks]string
+	updateItem, status, copyIP, open, network, disconnect, invite, settings, quit, turnOff *systray.MenuItem
+	slots                                                                                  [maxTrayNetworks]*systray.MenuItem
+	slotIDs                                                                                [maxTrayNetworks]string
 }
 
 func newTray(app *App, host *wailsHost) *tray {
@@ -141,6 +141,7 @@ func (t *tray) onReady() {
 	systray.AddSeparator()
 	t.settings = systray.AddMenuItem("Settings", "")
 	t.quit = systray.AddMenuItem("Quit Lanfolk", "Closes this app. You stay online in your network; choose Network, Disconnect to go offline.")
+	t.turnOff = systray.AddMenuItem("Turn off Lanfolk", "Closes this app and stops the Lanfolk service: you go offline and nothing of Lanfolk runs until you open it again or Windows starts.")
 
 	systray.SetOnTapped(t.toggleWindow)
 	systray.SetOnSecondaryTapped(nil) // right click shows the menu (default)
@@ -288,15 +289,39 @@ func (t *tray) handleClicks() {
 		case <-t.settings.ClickedCh:
 			t.doSettings()
 		case <-t.quit.ClickedCh:
-			if ctx := t.host.context(); ctx != nil {
-				wailsruntime.Quit(ctx)
-			}
+			t.quitApp()
 			return
+		case <-t.turnOff.ClickedCh:
+			if t.doTurnOff() {
+				return
+			}
 		}
 	}
 }
 
 // The tray actions; the menu and the automation API both call these.
+
+func (t *tray) quitApp() {
+	if ctx := t.host.context(); ctx != nil {
+		wailsruntime.Quit(ctx)
+	}
+}
+
+// doTurnOff stops the service, closes the Settings window and quits. The
+// service stays an automatic service, so it starts again with Windows (and
+// the sign-in start of the app is not changed); opening Lanfolk starts it
+// too. If the service cannot be stopped the app stays open and says so.
+func (t *tray) doTurnOff() bool {
+	err := t.app.turnOffService()
+	if err != nil && t.app.Connected() {
+		showNotice(notice{Title: "Lanfolk is still running",
+			Body: "Could not stop the Lanfolk service: " + userError(err).Error()})
+		return false
+	}
+	closeSettingsWindow()
+	t.quitApp()
+	return true
+}
 
 func (t *tray) doOpen() { t.showWindow() }
 
@@ -368,6 +393,8 @@ func (t *tray) simulate(item, id string) error {
 		t.toggleWindow()
 	case "update":
 		t.doUpdate()
+	case "turn-off":
+		go t.doTurnOff()
 	case "notice": // automation: show a test notification
 		return showNotice(notice{Title: "Lanfolk test notification", Body: id})
 	default:

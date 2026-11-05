@@ -17,7 +17,7 @@ package main
 //	GET  /screenshot  PNG of the window (works when it is covered).
 //	POST /window?op=show|hide|minimise|move&x=..&y=..
 //	GET  /tray        the tray model (icon, tooltip, menu state) as JSON.
-//	POST /tray?item=open|copy-ip|settings|invite|disconnect|network&id=..
+//	POST /tray?item=open|copy-ip|settings|invite|disconnect|network|turn-off&id=..
 
 import (
 	"context"

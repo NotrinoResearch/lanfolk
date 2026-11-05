@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -190,6 +191,7 @@ func fastApp(addr string, host Host) *App {
 	a.backoffMin = 5 * time.Millisecond
 	a.backoffMax = 40 * time.Millisecond
 	a.callTimeout = 3 * time.Second
+	a.startSvc = func() error { return errors.New("tests never start the real service") }
 	return a
 }
 
@@ -573,4 +575,71 @@ func TestStopEndsRunLoop(t *testing.T) {
 	if a.Connected() {
 		t.Fatal("still connected after stop")
 	}
+}
+
+// startCounter replaces App.startSvc: it counts calls and signals each one.
+func startCounter(a *App) (calls *atomic.Int32, called chan struct{}) {
+	calls, called = new(atomic.Int32), make(chan struct{}, 8)
+	a.startSvc = func() error {
+		calls.Add(1)
+		called <- struct{}{}
+		return nil
+	}
+	return calls, called
+}
+
+func waitCalled(t *testing.T, ch chan struct{}) {
+	t.Helper()
+	select {
+	case <-ch:
+	case <-time.After(3 * time.Second):
+		t.Fatal("the app did not try to start the service")
+	}
+}
+
+// Opening Lanfolk after it was turned off starts the service again, once.
+func TestMainWindowStartsAStoppedService(t *testing.T) {
+	addr := testAddr(t)
+	h := &fakeHost{}
+	a := fastApp(addr, h)
+	a.mode = "main"
+	calls, called := startCounter(a)
+	a.start(context.Background())
+	defer a.stop()
+	waitCalled(t, called)
+	time.Sleep(50 * time.Millisecond) // several failed dials while the service starts
+	newFake(t, addr, nil)
+	h.wait(t, "service", serviceIs(true))
+	if n := calls.Load(); n != 1 {
+		t.Fatalf("started the service %d times, want once", n)
+	}
+}
+
+// The Settings window does not start the service by itself; Try again does.
+func TestRetryStartsTheService(t *testing.T) {
+	addr := testAddr(t)
+	h := &fakeHost{}
+	a := fastApp(addr, h)
+	a.mode = "settings"
+	calls, called := startCounter(a)
+	a.start(context.Background())
+	defer a.stop()
+	h.wait(t, "service", serviceIs(false))
+	time.Sleep(50 * time.Millisecond)
+	if n := calls.Load(); n != 0 {
+		t.Fatalf("settings window started the service %d times", n)
+	}
+	a.Retry()
+	waitCalled(t, called)
+	newFake(t, addr, nil)
+	h.wait(t, "service", serviceIs(true))
+}
+
+func TestTurnOffServiceAsksTheServiceToStop(t *testing.T) {
+	f := newFake(t, testAddr(t), nil)
+	a, _ := startedApp(t, f)
+	if err := a.turnOffService(); err != nil {
+		t.Fatal(err)
+	}
+	f.last(t, ipc.MethodShutdown)
 }

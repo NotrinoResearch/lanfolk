@@ -44,7 +44,8 @@ file first.
 4. Start the game and look for the others in its LAN or multiplayer browser.
 
 Closing the window keeps Lanfolk running in the notification area next to the
-clock. The [user guide](docs/SETUP.md) covers the rest, including what to do
+clock. To stop it completely, right-click the tray icon and choose **Turn off
+Lanfolk**; it starts again with Windows or when you open it. The [user guide](docs/SETUP.md) covers the rest, including what to do
 when a game doesn't find the other players.
 
 ## What it does
@@ -72,11 +73,13 @@ anyone who wants to sell or bundle it need a commercial license: see
 
 ## Status
 
-Lanfolk 0.2 is a beta. It has been tested on Windows 11 between two machines
-behind separate NATs, over a direct path and through the relay; the
-measurements are in [docs/MEASUREMENTS.md](docs/MEASUREMENTS.md). Tests with
-more internet providers, real games and Windows 10 are still open and tracked
-in [docs/TODO.md](docs/TODO.md).
+Lanfolk 0.4 is a beta. It has been tested on Windows 11 between two homes
+behind separate NATs, over a direct path and through the relay, including
+Commandos 2 (DirectPlay) in both directions; the measurements are in
+[docs/MEASUREMENTS.md](docs/MEASUREMENTS.md) and the games tried so far in
+[docs/COMPATIBILITY.md](docs/COMPATIBILITY.md). Tests with more internet
+providers, more games and Windows 10 are still open and tracked in
+[docs/TODO.md](docs/TODO.md).
 
 Found a bug or a game that doesn't work? Please
 [open an issue](https://github.com/NotrinoResearch/lanfolk/issues) and attach

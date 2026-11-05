@@ -1106,6 +1106,7 @@ those in `internal/ipc/api.go`; field names are the JSON names.
 | `invites.redeem` | `{code}` | `{network_id, owner_public_key, state}` | Start joining with an invite code (`state` is `waiting`, or the state of an identical join already in progress) |
 | `invites.list` | none | `[PendingJoin]` | Invite codes the user redeemed and their progress |
 | `invites.cancel` | `{network_id}` | none | Stop waiting for an invite (an owner who became a friend only through the invite is removed again unless a network is shared) |
+| `service.shutdown` | none | none | Stop the service after the reply, as the user asked ("Turn off Lanfolk"); it stays an automatic service and starts again with Windows or when the app starts it (D-039) |
 
 For methods whose result or parameter type the Go declaration does not state
 (`identity.setNickname`'s result, `networks.*`'s result, `conncode.create`'s

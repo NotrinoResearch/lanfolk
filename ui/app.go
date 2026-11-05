@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/NotrinoResearch/lanfolk/internal/ipc"
@@ -59,6 +60,12 @@ type App struct {
 
 	wake chan struct{} // Retry wakes the connection loop
 
+	// startSvc starts a stopped service (startService; tests replace it).
+	// The main window tries it once when it cannot connect at launch, and
+	// again whenever the user chooses Try again.
+	startSvc   func() error
+	startAsked atomic.Bool
+
 	// Update check (update.go); the main window's process runs it.
 	httpClient  *http.Client
 	updateURL   string
@@ -78,6 +85,7 @@ func NewApp(addr string, host Host) *App {
 		backoffMax:  5 * time.Second,
 		callTimeout: defaultCallTimeout,
 		wake:        make(chan struct{}, 1),
+		startSvc:    startService,
 		httpClient:  &http.Client{Timeout: updateTimeout},
 		updateURL:   releasesAPI,
 		updateFirst: updateFirstDelay,
@@ -112,11 +120,19 @@ func (a *App) stop() {
 // subscribes, re-emits events and starts over when the connection ends.
 func (a *App) run(ctx context.Context) {
 	delay := a.backoffMin
+	if a.mode == "main" {
+		a.startAsked.Store(true) // opening Lanfolk turns it on again
+	}
 	for ctx.Err() == nil {
 		c, err := a.connect(ctx)
 		if err != nil {
 			if ctx.Err() != nil {
 				return
+			}
+			if a.startAsked.Swap(false) && a.startSvc != nil {
+				if serr := a.startSvc(); serr == nil {
+					delay = a.backoffMin // started (or starting): dial again soon
+				}
 			}
 			a.publishState(ServiceState{Connected: false, Message: serviceMessage(err)})
 			if !a.sleep(ctx, delay) {
@@ -171,6 +187,7 @@ func (a *App) sleep(ctx context.Context, d time.Duration) bool {
 // Retry makes the connection loop try again right away instead of waiting
 // for its backoff delay. It does not block.
 func (a *App) Retry() {
+	a.startAsked.Store(true)
 	select {
 	case a.wake <- struct{}{}:
 	default:
@@ -320,6 +337,13 @@ func normalizeNetworks(n []ipc.Network) []ipc.Network {
 		n[i].Relays = orEmpty(n[i].Relays)
 	}
 	return n
+}
+
+// turnOffService asks the service to stop (service.shutdown). The service
+// replies first and stops a moment later; it starts again with Windows or
+// when Lanfolk is opened.
+func (a *App) turnOffService() error {
+	return a.callWithTimeout(5*time.Second, ipc.MethodShutdown, nil, nil)
 }
 
 // call performs one request on the current connection.

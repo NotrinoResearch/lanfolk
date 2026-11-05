@@ -27,7 +27,7 @@ type UserError struct {
 func (e *UserError) Error() string { return e.Message }
 
 var (
-	errNotRunning     = &UserError{Code: CodeNotRunning, Message: "The Lanfolk service is not running. It starts with Windows; if it does not come back, restart the computer."}
+	errNotRunning     = &UserError{Code: CodeNotRunning, Message: "The Lanfolk service is not running. Open Lanfolk or choose Try again to start it; it also starts with Windows."}
 	errWindowNotReady = &UserError{Code: CodeLocal, Message: "The window is not ready yet. Try again in a moment."}
 )
 

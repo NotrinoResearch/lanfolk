@@ -6,6 +6,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -17,6 +18,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/NotrinoResearch/lanfolk/internal/engine"
 	"github.com/NotrinoResearch/lanfolk/internal/ipc"
@@ -193,6 +195,11 @@ func openLogger(o options, console bool) (*slog.Logger, error) {
 
 // serve runs the engine and the control server until ctx ends.
 func serve(ctx context.Context, o options, log *slog.Logger) error {
+	// The owner can turn Lanfolk off from the app (service.shutdown): serve
+	// then returns nil and the service reports a clean stop, which Windows
+	// does not treat as a failure to recover from.
+	ctx, shutdown := context.WithCancel(ctx)
+	defer shutdown()
 	srv := &ipc.Server{Logger: log}
 	cfg := engine.Config{
 		DataDir:    o.dataDir,
@@ -223,7 +230,7 @@ func serve(ctx context.Context, o options, log *slog.Logger) error {
 	if err != nil {
 		return err
 	}
-	srv.Handler = e.Handle
+	srv.Handler = withShutdown(e.Handle, shutdown, log)
 	srv.Authorize = func(c net.Conn) error { return authorize(e, c) }
 	ln, err := ipc.Listen(o.pipe)
 	if err != nil {
@@ -238,6 +245,27 @@ func serve(ctx context.Context, o options, log *slog.Logger) error {
 	err = e.Run(ctx)
 	wait() // DirectPlay's setting is restored before the service exits
 	return err
+}
+
+// shutdownDelay lets the reply to service.shutdown reach the client before
+// the control pipe closes.
+const shutdownDelay = 200 * time.Millisecond
+
+// withShutdown answers service.shutdown by stopping the service shortly after
+// the reply; every other method goes to h. Only authorized clients (the owner
+// and administrators) reach a handler.
+func withShutdown(h ipc.Handler, stop func(), log *slog.Logger) ipc.Handler {
+	var once sync.Once
+	return func(ctx context.Context, method string, params json.RawMessage) (any, error) {
+		if method != ipc.MethodShutdown {
+			return h(ctx, method, params)
+		}
+		once.Do(func() {
+			log.Info("stopping: turned off from the app")
+			time.AfterFunc(shutdownDelay, stop)
+		})
+		return nil, nil
+	}
 }
 
 // authorize lets the session owner and administrators control the service.

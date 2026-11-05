@@ -42,6 +42,7 @@ const (
 	MethodRedeemInvite      = "invites.redeem"
 	MethodListInvites       = "invites.list"
 	MethodCancelInvite      = "invites.cancel"
+	MethodShutdown          = "service.shutdown"
 )
 
 // Events pushed to subscribed clients.

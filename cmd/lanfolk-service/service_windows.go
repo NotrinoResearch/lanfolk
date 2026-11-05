@@ -133,6 +133,9 @@ func install(o options) error {
 		return fmt.Errorf("create service: %w", err)
 	}
 	defer s.Close()
+	if err := allowUsersToStart(s); err != nil {
+		fmt.Fprintln(os.Stderr, "warning: the app cannot start the service after it was turned off:", err)
+	}
 	s.SetRecoveryActions([]mgr.RecoveryAction{
 		{Type: mgr.ServiceRestart, Delay: 5 * time.Second},
 		{Type: mgr.ServiceRestart, Delay: 30 * time.Second},
@@ -158,6 +161,25 @@ func install(o options) error {
 	}
 	fmt.Println("Lanfolk service installed.")
 	return nil
+}
+
+// serviceSDDL is Windows' default service DACL with one addition: signed-in
+// (interactive) users may start the service (RP), so the app can turn
+// Lanfolk on again after the user turned it off. Stopping (WP) and changing
+// it stay with administrators and LocalSystem; the owner stops it through the
+// control pipe (service.shutdown).
+const serviceSDDL = "D:(A;;CCLCSWRPWPDTLOCRRC;;;SY)(A;;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;BA)(A;;CCLCSWRPLOCRRC;;;IU)(A;;CCLCSWLOCRRC;;;SU)"
+
+func allowUsersToStart(s *mgr.Service) error {
+	sd, err := windows.SecurityDescriptorFromString(serviceSDDL)
+	if err != nil {
+		return err
+	}
+	dacl, _, err := sd.DACL()
+	if err != nil {
+		return err
+	}
+	return windows.SetSecurityInfo(s.Handle, windows.SE_SERVICE, windows.DACL_SECURITY_INFORMATION, nil, nil, dacl, nil)
 }
 
 func currentUserSID() string {

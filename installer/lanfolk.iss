@@ -176,6 +176,11 @@ const
 
 var
   ServiceFailed: Boolean;
+  // OldServiceRemoved: an upgrade removed the installed service in ssInstall.
+  // FilesInstalled: ssPostInstall was reached. When Setup fails in between
+  // (a file in use), DeinitializeSetup registers the service again, so a
+  // failed upgrade does not leave Lanfolk without its service.
+  OldServiceRemoved, FilesInstalled: Boolean;
 
 // ------------------------------------------------------------- helpers ----
 
@@ -258,6 +263,17 @@ begin
       Sleep(1500);
     Exec(TaskKill, '/F /IM "' + UiExeName + '"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   end;
+end;
+
+// CloseTools ends Lanfolk's command-line tools (a running "lanprobe serve"
+// keeps lanprobe.exe open and Setup could not replace it).
+procedure CloseTools;
+var
+  TaskKill: String;
+  ResultCode: Integer;
+begin
+  TaskKill := ExpandConstant('{sys}	askkill.exe');
+  Exec(TaskKill, '/F /IM lanprobe.exe /IM natprobe.exe /IM lanfolk-cli.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 end;
 
 // WaitForServiceExit gives a removed service's process up to 5 seconds to
@@ -442,7 +458,34 @@ end;
 function InitializeSetup: Boolean;
 begin
   ServiceFailed := False;
+  OldServiceRemoved := False;
+  FilesInstalled := False;
   Result := True;
+end;
+
+// Setup failed or was cancelled after the old service was removed: register
+// and start the service of the files that are there now (the old version after
+// a rollback).
+procedure DeinitializeSetup;
+var
+  Exe, Output: String;
+  Code: Integer;
+begin
+  if (not OldServiceRemoved) or FilesInstalled then
+    Exit;
+  Exe := ExpandConstant('{app}') + ServiceExeName;
+  if not FileExists(Exe) then
+  begin
+    Log('Setup did not finish and ' + Exe + ' is missing; the service cannot be restored.');
+    Exit;
+  end;
+  Code := RunCaptured(Exe, 'install', Output);
+  Log(Format('Setup did not finish; service registered again: %d %s', [Code, Output]));
+  if Code = 0 then
+  begin
+    Code := RunCaptured(Exe, 'start', Output);
+    Log(Format('Service start: %d %s', [Code, Output]));
+  end;
 end;
 
 function ServiceReady: Boolean;
@@ -481,7 +524,9 @@ begin
     // replaced (the service holds wintun.dll open). User data is not touched.
     SetStatus('StatusClosingApp');
     CloseUI;
+    CloseTools;
     SetStatus('StatusRemovingService');
+    OldServiceRemoved := FileExists(AddBackslash(AppDir) + ServiceExeName);
     if not RemoveService(AppDir, Code, Output) then
       Log(Format('Previous service uninstall returned %d: %s', [Code, Output]));
     // A former NSIS install may live in another folder.
@@ -493,6 +538,7 @@ begin
 
   if CurStep = ssPostInstall then
   begin
+    FilesInstalled := True;
     // PATH and auto-start follow the selected tasks on every run, so an
     // upgrade can also switch them off.
     if WizardIsTaskSelected('addtopath') then
