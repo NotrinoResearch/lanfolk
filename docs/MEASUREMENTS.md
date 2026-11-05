@@ -149,6 +149,42 @@ relay (about 70 ms from this line), as expected for host to relay to host.
 
 Not covered yet: two physical machines on different ISPs.
 
+## Two-home matrix with Commandos 2 (0.4.1-dev, D-034 and D-035)
+
+2026-11-05, 09:25-11:20. A: this development machine on a phone hotspot
+(mobile line). B ("evo"): Windows 11 on home fiber in another network. Both ran
+the same 0.4.1-dev service build. Every combination of: host side (A or B),
+host mode and joiner mode (capture or compatibility), Relay only (off, host,
+joiner, both). For each: `lanprobe test` in both directions, then Commandos 2
+(DirectPlay 4) hosts a game on one side and the other side joins from the
+session list. A join passes when the host holds an established TCP
+connection with the joiner (checked on the host and on screenshots of both
+lobbies). The runner and game automation live in the Commandos 2 test rig.
+
+| Result | Count |
+| --- | --- |
+| Game: session listed and joined | 32 of 32 |
+| lanprobe core tests, both directions | 32 of 32 PASS |
+| Global bcast (0.0.0.0), informational | 64 of 64 PASS (FAIL before D-034) |
+| Mcast (default interface), informational | FAIL whenever the sender is in capture mode, PASS in compatibility mode |
+| Path with Relay only on either side | shared relay on both sides, 160-220 ms (with D-035; before it, the other side stayed direct) |
+| Path with Relay only off | direct, 48-83 ms, except two runs (below) |
+
+Two runs (A host compat / joiner capture, and B host compat / joiner compat)
+expected a direct path but stayed on the shared relay for the 2 minute
+wait. In both, the combination before had switched compatibility mode
+(tunnel restart) and Relay only. The game worked over the relay. Not
+explained yet; see TODO.md.
+
+First hosting on B showed Windows' firewall prompt for DirectPlay Helper
+(`dplaysvr.exe`); until it was answered, B could not host (three runs,
+repeated after the prompt was allowed). Answering Cancel would create a
+block rule, and block rules win over Lanfolk's allow rule.
+
+Not covered: playing a mission (the machine B blocks the game's renderer
+under Smart App Control, so missions stay black), long sessions, path
+changes during a game (RESILIENCE_PLAN.md).
+
 ## Tunnel overhead (Phase 1, `lanprobe latency -compare`)
 
 Target: at most 1 ms p50 and 3 ms p99 over the raw path.

@@ -70,6 +70,37 @@ Last updated: 5 November 2026.
       and, after about 90 s, the friendship that only the invite created is
       gone on both sides.
 
+## Release 0.4.1
+
+- [ ] Ship D-034 (captured broadcasts get a fresh UDP checksum) and D-035
+      (Relay only holds for both directions; WireGuard does not roam).
+- [x] Finish the two-home matrix (host side x capture/compat on each side x
+      Relay only placement, lanprobe both ways and Commandos 2) and record
+      it in MEASUREMENTS.md. Result (5 November): 32 of 32 joined, lanprobe
+      core 32 of 32 in both directions.
+- [ ] Find why the path stayed on the relay for over 2 minutes in two matrix
+      runs after compatibility mode and Relay only had been switched
+      (MEASUREMENTS.md, two-home matrix).
+- [ ] Diagnostic report: detect Windows Firewall block rules for programs
+      (a "Cancel" on the firewall prompt creates them, and they win over
+      Lanfolk's allow rule) and tell the user how to remove them.
+- [ ] Capture mode does not forward multicast sent to the default
+      interface (lanprobe "Mcast (default)" fails on the capture side).
+      Decide whether capture should cover it like global broadcast.
+- [ ] Repeat the two-home Commandos 2 test with osman on 0.4.1.
+
+## Release 0.5.0: connection resilience
+
+The plan, targets and order are in [RESILIENCE_PLAN.md](RESILIENCE_PLAN.md).
+
+- [ ] Phase 1: impairment hooks for engine tests, gap report in `lanprobe
+      latency`, two-machine scenario runner, baseline in MEASUREMENTS.md.
+- [ ] Phase 2: compatibility mode without a tunnel restart (2.1),
+      make-before-break (2.3), faster return after a short blip (2.4);
+      decide adaptive failure detection (2.2) and redundant sending (2.5).
+- [ ] Phase 3: field validation between two homes, including a manual
+      network switch during a game.
+
 ## Installer
 
 - [ ] Install, upgrade and uninstall on a clean Windows 10 (64-bit). Only
