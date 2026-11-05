@@ -484,6 +484,13 @@ func (e *Engine) Diagnostics() string {
 	return string(b)
 }
 
+// NetworkActive reports whether a network is active (the tunnel is wanted).
+func (e *Engine) NetworkActive() bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.active != nil
+}
+
 // OwnerSID returns the account allowed to use the control pipe.
 func (e *Engine) OwnerSID() string { return e.store.Data().OwnerSID }
 

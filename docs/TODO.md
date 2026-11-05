@@ -98,8 +98,20 @@ Last updated: 5 November 2026.
 - [x] Ship D-037 (announced nicknames survive a restart). Built and upgraded
       the home-fiber lab machine from 0.4.1 silently (5 November): identity,
       network, settings and friends kept, no restart asked.
-- [ ] Two-home game test with osman on 0.4.1 or 0.4.2 (he updates through
-      the in-app notice).
+- [x] Two-home game test with osman on 0.4.2 (5 November): the session was
+      not listed; cause in D-038.
+
+## Release 0.4.3
+
+- [x] Find why a member behind a UPnP router (osman) sees no DirectPlay
+      session: DirectPlay announces the router's external address (D-038).
+- [x] Reproduce it without a second person: Hyper-V lab VM behind a fake
+      UPnP router (LanfolkLab, outside the repository), validated with
+      Commandos 2 (list and join) before and after the change.
+- [ ] Ship D-038, then a short game test with osman (he only installs the
+      update; nothing to change on his side).
+- [ ] Put the lab VM and the fake router into TESTING.md and a script, so
+      the UPnP case is part of the matrix.
 
 ## Release 0.5.0: connection resilience
 

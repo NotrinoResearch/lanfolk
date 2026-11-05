@@ -745,3 +745,64 @@ An engine test renames a member, restarts the other side with the member
 offline, and checks the member and friend lists. It fails on the code before
 this change. Names that were never stored (before 0.4.2) appear after the
 member's first connection.
+
+## D-038 DirectPlay announces the virtual LAN, not the member's router
+
+Date: 2026-11-05.
+
+The second two-home test with osman (Lanfolk 0.4.2 on both sides, direct
+path, 22 ms) still showed no Commandos 2 session. A packet capture on the
+host showed osman's DirectPlay session requests arriving through Lanfolk.
+Each request carried a reply address of `10.229.176.218:22217`: the
+external address of osman's router (inside his provider's CGNAT) and a port
+DirectPlay had forwarded there with UPnP. The host answered that address
+over the internet, where it is unreachable. This also explains the first
+report ("the host tried TCP to 10.229.x.x:22217").
+
+Reverse engineering of the Windows DirectPlay components (Ghidra, on this
+machine's `dpwsockx.dll` and `dpnathlp.dll`) showed the mechanism.
+`dpnhupnp.dll` and `dpnhpast.dll` are 10 KB stubs; the NAT helper is
+`dpnathlp.dll`, which the TCP/IP service provider loads. It sends unicast
+SSDP searches to the default gateway, asks for the external address, maps
+a port, and DirectPlay writes that address into its messages. The helper
+reads `HKCU\Software\Microsoft\DirectPlayNATHelp\DPNHUPnP\UPnPMode` from
+the current user's hive, not the machine's. 1 means always use UPnP, 2
+means never, anything else means use it unless the SSDP or UPnP host
+service is disabled. The helper also keeps its mappings in
+`...\DPNHUPnP\ActiveNATMappings`, which is why the port stayed 22217.
+Changing the machine-wide keys (`HKLM`, the provider's `Gateway` value)
+had no effect.
+
+**Decision.** While a network is active, the service keeps `UPnPMode = 2`
+for the owner account (the account recorded for the control pipe, D-033),
+in `HKU\<SID>`. When no network is active, and when the service stops, it
+restores the value it replaced. The replaced value is kept in
+`directplay-upnp.json` in the data folder, so the restore also works after
+a restart. A value that the account changed itself in the meantime is left
+alone. An account that is signed out is handled when its registry is
+loaded again. The service checks every 2 s; a check without a change reads
+one registry value.
+
+This is not a game rule. DirectPlay is a Windows component, and the setting
+applies to every DirectPlay game. The cost is that while a Lanfolk network
+is active, DirectPlay games cannot open router ports over UPnP for play
+outside Lanfolk. Lanfolk provides the connection they need for LAN play.
+
+Considered and rejected:
+- Asking users to turn off UPnP on their router (it also removes Lanfolk's
+  own port mapping, and users will not do it).
+- Changing the setting by hand.
+- Rewriting the address inside DirectPlay messages in the tunnel (a
+  protocol parser in the packet path, and the port would also need the
+  router's mapping).
+
+Lab reproduction (no second person needed): a Hyper-V VM behind a fake UPnP
+router on this PC (`fakeigd.py` answers SSDP and the WANIPConnection SOAP
+actions with external address 10.229.1.2). Without the change, the VM's
+DirectPlay mapped TCP 24197, its requests carried `10.229.1.2:24197` and
+the session list stayed empty. With the 0.4.3 development service, the VM
+sent no UPnP request and its requests carried `0.0.0.0:2300`. The session
+was listed and the join reached both lobbies. Turning the network off
+restored the account's value, and turning it on again set it to 2. Unit tests
+cover unset and set values, a restart in between, a value changed by the
+user, a reset while active and a signed-out account.

@@ -231,7 +231,13 @@ func serve(ctx context.Context, o options, log *slog.Logger) error {
 	}
 	log.Info("lanfolk service started", "version", version.Version, "key", e.PublicKey().String(), "udp_port", e.Port())
 	go srv.Serve(ctx, ln)
-	return e.Run(ctx)
+	wait := func() {}
+	if !o.noTUN {
+		wait = startDirectPlayGuard(ctx, e, o.dataDir, log)
+	}
+	err = e.Run(ctx)
+	wait() // DirectPlay's setting is restored before the service exits
+	return err
 }
 
 // authorize lets the session owner and administrators control the service.
