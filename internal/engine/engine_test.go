@@ -346,6 +346,31 @@ func TestRenameShowsInMemberAndFriendLists(t *testing.T) {
 	})
 }
 
+// 5 November: after the service restarted, an offline friend who had renamed
+// himself showed the name he had when he joined ("Player-241D"), because the
+// announced nickname lived only in memory.
+func TestRenamedMemberKeepsNameAfterRestart(t *testing.T) {
+	r := startTestRelay(t)
+	a, b := newNode(t, "ahmet", r), newNode(t, "mehmet", r)
+	befriend(t, a, b)
+	createNetwork(t, a, b)
+	if err := b.e.SetNickname("osman"); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 10*time.Second, "new nickname at a", func() bool { return memberName(a, b) == "osman" })
+	b.stop()
+	a.stop()
+
+	a2 := newNodeIn(t, "ahmet", r, a.dir, nil) // b stays offline
+	if got := memberName(a2, b); got != "osman" {
+		t.Fatalf("member list shows %q after a restart", got)
+	}
+	f := a2.e.Friends()
+	if len(f) != 1 || f[0].Nickname != "osman" {
+		t.Fatalf("friend list shows %+v after a restart", f)
+	}
+}
+
 func TestNetworkTunnelDirectPath(t *testing.T) {
 	r := startTestRelay(t)
 	a, b := newNode(t, "ahmet", r), newNode(t, "mehmet", r)

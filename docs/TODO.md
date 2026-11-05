@@ -93,6 +93,11 @@ Last updated: 5 November 2026.
       interface (lanprobe "Mcast (default)" fails on the capture side).
       Decide whether capture should cover it like global broadcast.
 
+## Release 0.4.2
+
+- [ ] Ship D-037 (announced nicknames survive a restart): build, upgrade
+      both lab machines from 0.4.1, check the names and a short two-home run.
+
 ## Release 0.5.0: connection resilience
 
 The plan, targets and order are in [RESILIENCE_PLAN.md](RESILIENCE_PLAN.md).

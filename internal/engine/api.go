@@ -173,14 +173,15 @@ func (e *Engine) Friends() []ipc.Friend {
 //
 // The signed member list keeps the nickname a member had when it joined.
 // Members show their current nickname instead: our own, or the one a peer
-// last announced in Hello. The list nickname is the fallback for members we
-// have not heard from in this run.
+// last announced in Hello, which is remembered across restarts. The list
+// nickname is the fallback for members that never announced one to us.
 func (e *Engine) Networks() []ipc.Network {
 	type named struct {
 		net, mem int
 		p        *peer
 	}
 	var live []named
+	known := e.store.KnownNames()
 	e.mu.Lock()
 	me := e.key.Public()
 	nick := e.nick
@@ -193,6 +194,9 @@ func (e *Engine) Networks() []ipc.Network {
 			mem := ipc.Member{PublicKey: m.PublicKey.Hex(), Nickname: m.Nickname,
 				VirtualIP: m.VirtualIP.String(), IsSelf: m.PublicKey == me, IsOwner: m.PublicKey == l.Owner,
 				IsFriend: p != nil && p.isFriend && p.confirmed}
+			if k := known[mem.PublicKey]; k != "" && !mem.IsSelf {
+				mem.Nickname = k
+			}
 			if mem.IsSelf && nick != "" {
 				mem.Nickname = nick
 			} else if p != nil {

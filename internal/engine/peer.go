@@ -157,6 +157,7 @@ func (e *Engine) reconcileLocked() {
 	d := e.store.Data()
 	want := make(map[identity.PublicKey]*peer)
 	friendSet := make(map[identity.PublicKey]store.Friend)
+	known := d.KnownNameMap()
 	for _, f := range d.Friends {
 		pk, err := identity.ParsePublicKeyHex(f.PublicKey)
 		if err == nil && pk != e.key.Public() {
@@ -183,6 +184,8 @@ func (e *Engine) reconcileLocked() {
 				return nil
 			}
 			p = np
+			// The last announced nickname, until the peer says otherwise.
+			p.nick = known[pk.Hex()]
 			for _, r := range e.relays {
 				r.client.Register(p.sid)
 			}
@@ -524,6 +527,11 @@ func (e *Engine) onHello(p *peer, m *peermsg.Hello) {
 	e.mu.Unlock()
 	if confirm {
 		e.confirmFriend(p)
+	}
+	if renamed && m.Nickname != "" {
+		// Remember it across restarts: offline members keep their current name.
+		pub, nick, at := p.key.Hex(), m.Nickname, now.UTC()
+		e.store.UpdateLater(func(d *store.Data) { d.RememberName(pub, nick, at) })
 	}
 	if renamed {
 		// Member lists and friends show the announced nickname.

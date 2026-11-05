@@ -21,6 +21,9 @@ const FileName = "lanfolk.json"
 // SchemaVersion is the current file format.
 const SchemaVersion = 1
 
+// MaxKnownNames bounds the remembered nicknames of peers.
+const MaxKnownNames = 512
+
 // MaxPeerCache bounds the last-known-good address cache.
 const MaxPeerCache = 512
 
@@ -90,6 +93,16 @@ type Member struct {
 	VirtualIP string `json:"virtual_ip"`
 }
 
+// KnownName is the nickname a peer last announced in a Hello. It is kept
+// across restarts, so members and friends show their current name while they
+// are offline; the signed member list keeps the name they had when they
+// joined.
+type KnownName struct {
+	PublicKey string    `json:"public_key"`
+	Nickname  string    `json:"nickname"`
+	SeenAt    time.Time `json:"seen_at"`
+}
+
 // PeerCacheEntry is a last-known-good address of a peer.
 type PeerCacheEntry struct {
 	PublicKey     string    `json:"public_key"`
@@ -132,6 +145,7 @@ type Data struct {
 	Networks      []Network        `json:"networks"`
 	Members       []Member         `json:"members"`
 	PeerCache     []PeerCacheEntry `json:"peer_cache"`
+	KnownNames    []KnownName      `json:"known_names,omitempty"`
 	Settings      Settings         `json:"settings"`
 	Invites       []Invite         `json:"invites,omitempty"`
 	PendingJoins  []PendingJoin    `json:"pending_joins,omitempty"`
@@ -142,6 +156,31 @@ type Data struct {
 
 func defaults() Data {
 	return Data{SchemaVersion: SchemaVersion, Settings: Settings{PortMapping: true, DHTFallback: true}}
+}
+
+// RememberName records the nickname a peer announced, keeping the list
+// bounded (the names seen longest ago go first).
+func (d *Data) RememberName(pub, nick string, at time.Time) {
+	for i := range d.KnownNames {
+		if d.KnownNames[i].PublicKey == pub {
+			d.KnownNames[i].Nickname, d.KnownNames[i].SeenAt = nick, at
+			return
+		}
+	}
+	d.KnownNames = append(d.KnownNames, KnownName{PublicKey: pub, Nickname: nick, SeenAt: at})
+	if len(d.KnownNames) > MaxKnownNames {
+		sort.Slice(d.KnownNames, func(i, j int) bool { return d.KnownNames[i].SeenAt.After(d.KnownNames[j].SeenAt) })
+		d.KnownNames = d.KnownNames[:MaxKnownNames]
+	}
+}
+
+// KnownNameMap returns the remembered nicknames by public key (hex).
+func (d *Data) KnownNameMap() map[string]string {
+	m := make(map[string]string, len(d.KnownNames))
+	for _, k := range d.KnownNames {
+		m[k.PublicKey] = k.Nickname
+	}
+	return m
 }
 
 // RememberPath records a working address of a peer, keeping the cache bounded.
@@ -222,6 +261,14 @@ func (s *Store) Data() Data {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return clone(s.data)
+}
+
+// KnownNames returns the remembered nicknames by public key (hex) without
+// copying the rest of the data.
+func (s *Store) KnownNames() map[string]string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.data.KnownNameMap()
 }
 
 // Update applies fn to a copy and saves it atomically. If fn or the save

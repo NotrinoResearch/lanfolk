@@ -721,3 +721,27 @@ An engine test blocks the direct path until both sides have failed it
 direct again within 6 s. It fails on the code before this change. The plan's
 item 2.4 (faster return after a short blip without any message from the
 peer) stays open.
+
+## D-037 Announced nicknames survive a restart
+
+Date: 2026-11-05.
+
+The signed member list keeps the nickname a member had when they joined; the
+nickname a member announces later (Hello) was kept only in memory (D-030).
+After the service restarted, a friend who had renamed himself showed his
+first name ("Player-241D") again until he came back online. Restarts are
+normal (Windows updates, a Lanfolk update, a reboot), so users saw wrong
+names for offline members.
+
+The last announced nickname of each peer is now stored (`known_names`, at
+most 512, the oldest seen go first) and loaded as the peer's current name at
+start. Member lists, friends and connections show it; the member list
+nickname stays the fallback for members that never announced one to us. The
+store is written only when the name changes. Network names did not have this
+problem: a rename is a new version of the signed member list, which is
+stored and sent to every member.
+
+An engine test renames a member, restarts the other side with the member
+offline, and checks the member and friend lists. It fails on the code before
+this change. Names that were never stored (before 0.4.2) appear after the
+member's first connection.

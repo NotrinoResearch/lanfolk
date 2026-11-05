@@ -1,6 +1,7 @@
 package store
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -174,4 +175,23 @@ func TestUpdateLaterDoesNotBlockOnSave(t *testing.T) {
 	// temporary directory is removed.
 	<-updated
 	s.Flush()
+}
+
+func TestRememberNameUpdatesAndStaysBounded(t *testing.T) {
+	var d Data
+	t0 := time.Date(2026, 11, 5, 12, 0, 0, 0, time.UTC)
+	d.RememberName("aa", "Player-241D", t0)
+	d.RememberName("aa", "osman", t0.Add(time.Minute))
+	if m := d.KnownNameMap(); len(m) != 1 || m["aa"] != "osman" {
+		t.Fatalf("known names %v", m)
+	}
+	for i := 0; i < MaxKnownNames+10; i++ {
+		d.RememberName(fmt.Sprintf("k%04d", i), "n", t0.Add(time.Duration(i+2)*time.Minute))
+	}
+	if len(d.KnownNames) != MaxKnownNames {
+		t.Fatalf("%d names kept", len(d.KnownNames))
+	}
+	if _, ok := d.KnownNameMap()["aa"]; ok {
+		t.Fatal("the oldest name was not dropped")
+	}
 }
