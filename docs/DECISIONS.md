@@ -661,3 +661,37 @@ selection work. Compatibility mode worked before and after.
 DirectPlay 4 takes the peer addresses from the packet sources and does not
 carry physical IP addresses in its payload, so the "IP address in the
 payload" class did not apply.
+
+## D-035 Relay only holds for both directions; WireGuard does not roam
+
+Date: 2026-11-05.
+
+SETUP.md promises that with **Relay only** other members see only the relay's
+address. The two-home test matrix showed that this held only for the traffic
+the setting's owner sent. When B turned Relay only on, B moved to the relay,
+but A kept the direct path it already had. B still answered A's direct
+probes from its home address. A listed the path as direct (55 ms), and B
+listed it as relayed. A member that learned B's address before (from earlier
+candidates or the path cache) kept using it.
+
+The setting now holds in both directions:
+
+- A Relay only client drops control frames and WireGuard packets that
+  arrive on a direct path, so it never answers from its home address.
+- The Hello flag "relay only" is honoured: the path manager drops all direct
+  paths to such a peer, including the active one, and adds none while the
+  flag is set. Turning the setting on locally drops them the same way.
+  Before, the "keep sending on the last path" rule could keep a dead direct
+  path.
+- A change of the setting sends a Hello to every member at once, and
+  candidates go out again without waiting for the one-minute repeat, so
+  both sides switch within seconds in either direction.
+- WireGuard roaming is off (`DisableSomeRoamingForBrokenMobileSemantics`).
+  Every WireGuard peer's endpoint names the peer, and the path manager picks
+  the address at send time. Roaming to the source of an authenticated
+  packet bypassed path selection, and with it Relay only.
+
+An engine test turns Relay only on at one side of a working direct pair.
+Both sides must then use the relay, and no packet may pass between the two
+home addresses for three seconds. Turning the setting off must bring the
+direct path back. The test fails on the code before this change.

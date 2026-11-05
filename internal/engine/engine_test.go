@@ -9,6 +9,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -391,6 +392,47 @@ func TestSharedRelayWhenDirectIsBlocked(t *testing.T) {
 	if p := a.peer(b).Path; p != "shared-relay" {
 		t.Fatalf("path changed to %q although direct is blocked", p)
 	}
+}
+
+// Relay only on one side must move both directions to the relay and leave
+// the home address unused: the member that still knows it neither probes it
+// nor gets answers from it (SETUP.md: members see only the relay's address).
+func TestRelayOnlyOnOneSideStopsDirectTraffic(t *testing.T) {
+	r := startTestRelay(t)
+	a, b := newNode(t, "ahmet", r), newNode(t, "mehmet", r)
+	befriend(t, a, b)
+	createNetwork(t, a, b)
+	sendUntil(t, a, b, 9000, []byte("hello"))
+	waitFor(t, 10*time.Second, "direct path", func() bool { return a.peer(b).Path == "direct" && b.peer(a).Path == "direct" })
+
+	s := b.e.Settings()
+	s.RelayOnly = true
+	if _, err := b.e.SetSettings(s); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 10*time.Second, "relay on both sides", func() bool {
+		return a.peer(b).Path == "shared-relay" && b.peer(a).Path == "shared-relay"
+	})
+	var direct atomic.Int64
+	pa := a.e.Port()
+	b.e.Socket().SetFilter(func(x netip.AddrPort) bool {
+		if x.Port() == pa {
+			direct.Add(1)
+		}
+		return false
+	})
+	time.Sleep(3 * time.Second)
+	if n := direct.Load(); n != 0 {
+		t.Fatalf("%d packets between the home addresses after Relay only", n)
+	}
+	sendUntil(t, a, b, 9001, []byte("over the relay"))
+	sendUntil(t, b, a, 9001, []byte("and back"))
+
+	s.RelayOnly = false
+	if _, err := b.e.SetSettings(s); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, 15*time.Second, "direct path again", func() bool { return a.peer(b).Path == "direct" && b.peer(a).Path == "direct" })
 }
 
 func TestBroadcastAndBlockedPorts(t *testing.T) {

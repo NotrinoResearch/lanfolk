@@ -218,6 +218,9 @@ type Manager struct {
 	ring      [ringSize]probeRec
 	nextProbe uint64
 	firstID   uint64
+	// peerRelayOnly is set when the peer announced Relay only: it neither
+	// uses nor answers direct paths, so none are kept for it.
+	peerRelayOnly bool
 }
 
 // New creates a Manager.
@@ -229,7 +232,35 @@ func New(cfg Config) *Manager {
 }
 
 // SetConfig replaces the configuration (for example when Relay only changes).
-func (m *Manager) SetConfig(cfg Config) { m.cfg = cfg }
+// Turning Relay only on drops the direct paths, including the active one.
+func (m *Manager) SetConfig(cfg Config) {
+	m.cfg = cfg
+	if m.relayOnly() {
+		m.dropDirect()
+	}
+}
+
+// SetPeerRelayOnly records whether the peer announced Relay only (Hello
+// flag). Such a peer ignores direct paths, so they are dropped and no new
+// ones are added; the peer's home address stays unused.
+func (m *Manager) SetPeerRelayOnly(on bool) {
+	m.peerRelayOnly = on
+	if on {
+		m.dropDirect()
+	}
+}
+
+// relayOnly reports whether direct paths are off, by our setting or the
+// peer's.
+func (m *Manager) relayOnly() bool { return m.cfg.RelayOnly || m.peerRelayOnly }
+
+func (m *Manager) dropDirect() {
+	for _, id := range append([]PathID(nil), m.order...) {
+		if m.paths[id].kind == Direct {
+			m.remove(id)
+		}
+	}
+}
 
 func (m *Manager) add(p *path, now int64) PathID {
 	m.nextID++
@@ -266,8 +297,12 @@ func (m *Manager) startBurst(p *path, now int64) {
 }
 
 // AddDirect adds a direct candidate. It returns the path and whether it is
-// new. Re-adding a known address keeps the existing path.
+// new. Re-adding a known address keeps the existing path. While direct paths
+// are off (relayOnly) nothing is added and it returns 0, false.
 func (m *Manager) AddDirect(addr netip.AddrPort, src Source, now int64) (PathID, bool) {
+	if m.relayOnly() {
+		return 0, false
+	}
 	addr = netip.AddrPortFrom(addr.Addr().Unmap(), addr.Port())
 	for _, id := range m.order {
 		if p := m.paths[id]; p.kind == Direct && p.addr == addr {
@@ -442,7 +477,7 @@ func (m *Manager) fresh(p *path, now int64) bool {
 }
 
 func (m *Manager) probeable(p *path) bool {
-	if m.cfg.RelayOnly && p.kind == Direct {
+	if m.relayOnly() && p.kind == Direct {
 		return false
 	}
 	if isShared(p.kind) && !p.present {

@@ -183,6 +183,61 @@ func TestRelayOnlyNeverSelectsDirect(t *testing.T) {
 	}
 }
 
+func directPaths(m *Manager) int {
+	n := 0
+	for _, p := range m.Paths(0) {
+		if p.Kind == Direct {
+			n++
+		}
+	}
+	return n
+}
+
+// A peer that announces Relay only answers no direct probes; the working
+// direct path to it must go, not linger as the "last path" (privacy promise
+// of the setting: members see only the relay's address).
+func TestPeerRelayOnlyDropsDirectPaths(t *testing.T) {
+	s := newSim(t, DefaultConfig())
+	r := s.m.SetSharedRelay(0, SharedRelay, true, s.now)
+	d, _ := s.m.AddDirect(addrA, SourceSTUN, s.now)
+	s.rtt[r], s.rtt[d] = 80*time.Millisecond, 5*time.Millisecond
+	s.run(5 * time.Second)
+	if s.active().Kind != Direct {
+		t.Fatal("setup: direct path not selected")
+	}
+	s.m.SetPeerRelayOnly(true)
+	sent := s.sent[d]
+	s.run(5 * time.Second)
+	if s.active().Kind != SharedRelay {
+		t.Fatalf("active %v after the peer turned Relay only on", s.active().Kind)
+	}
+	if directPaths(s.m) != 0 || s.sent[d] != sent {
+		t.Fatal("direct path kept or probed after the peer turned Relay only on")
+	}
+	if id, added := s.m.AddDirect(addrB, SourcePeerReflexive, s.now); added || id != 0 {
+		t.Fatal("added a direct path to a Relay only peer")
+	}
+	s.m.SetPeerRelayOnly(false)
+	if _, added := s.m.AddDirect(addrB, SourceSTUN, s.now); !added {
+		t.Fatal("direct paths stay off after the peer turned Relay only off")
+	}
+}
+
+func TestRelayOnlySettingDropsActiveDirect(t *testing.T) {
+	s := newSim(t, DefaultConfig())
+	r := s.m.SetSharedRelay(0, SharedRelay, true, s.now)
+	d, _ := s.m.AddDirect(addrA, SourceSTUN, s.now)
+	s.rtt[r], s.rtt[d] = 80*time.Millisecond, 5*time.Millisecond
+	s.run(5 * time.Second)
+	cfg := DefaultConfig()
+	cfg.RelayOnly = true
+	s.m.SetConfig(cfg)
+	s.run(3 * time.Second)
+	if s.active().Kind != SharedRelay || directPaths(s.m) != 0 {
+		t.Fatal("turning Relay only on kept the direct path")
+	}
+}
+
 func TestMemberRelayVersusSharedAndTCPPenalty(t *testing.T) {
 	via, _ := identity.Generate()
 	s := newSim(t, DefaultConfig())

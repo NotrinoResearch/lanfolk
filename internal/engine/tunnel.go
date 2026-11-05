@@ -102,6 +102,10 @@ func (e *Engine) buildTunnel(self netip.Addr) (*tunnel, error) {
 		Errorf:   func(f string, args ...any) { e.log.Debug("wireguard: " + fmt.Sprintf(f, args...)) },
 	}
 	t.wg = device.NewDevice(t.wrap, e.bind, logger)
+	// Every peer's endpoint names the peer, and the path manager picks the
+	// address at send time. WireGuard must not roam an endpoint to the source
+	// of a packet: that would bypass path selection and Relay only.
+	t.wg.DisableSomeRoamingForBrokenMobileSemantics()
 	priv := e.key.X25519Private()
 	if err := t.wg.IpcSet("private_key=" + hex.EncodeToString(priv[:]) + "\n"); err != nil {
 		t.wg.Close()

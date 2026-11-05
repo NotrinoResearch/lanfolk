@@ -364,6 +364,7 @@ func (e *Engine) SetSettings(s ipc.Settings) (ipc.Settings, error) {
 	relayOnlyChanged := e.settings.RelayOnly != s.RelayOnly
 	e.settings = e.store.Data().Settings
 	e.syncSettingsCopies()
+	var hello []*peer
 	if relayOnlyChanged {
 		cfg := e.pathConfig()
 		for _, p := range e.peers {
@@ -371,12 +372,20 @@ func (e *Engine) SetSettings(s ipc.Settings) (ipc.Settings, error) {
 			if p.pm != nil {
 				p.pm.SetConfig(cfg)
 			}
+			p.candSentAt = time.Time{} // candidates go out again right away
 			p.mu.Unlock()
+			hello = append(hello, p)
 		}
+		e.rebuildAddrMap()
 	}
 	e.setCompatModeLocked(s.CompatMode)
 	e.applyRelaysLocked()
 	e.mu.Unlock()
+	// The Hello flag tells members right away, so they stop (or resume)
+	// using our direct address instead of waiting for the next Hello.
+	for _, p := range hello {
+		go e.sendHello(p)
+	}
 	go e.publishStatus()
 	return e.Settings(), nil
 }

@@ -121,6 +121,10 @@ func (p *peer) noteInbound(id pathmgr.PathID) {
 func (p *peer) directAddrs() []netip.AddrPort {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	return p.directAddrsLocked()
+}
+
+func (p *peer) directAddrsLocked() []netip.AddrPort {
 	if p.pm == nil {
 		return nil
 	}
@@ -243,6 +247,7 @@ func (e *Engine) startManagingLocked(p *peer, cache []store.PeerCacheEntry) {
 	now := nanotime()
 	p.mu.Lock()
 	p.pm = pathmgr.New(e.pathConfig())
+	p.pm.SetPeerRelayOnly(p.remoteFlags&peermsg.FlagRelayOnly != 0)
 	for i, r := range e.relays {
 		p.pm.SetSharedRelay(uint8(i), r.kind(), r.client.PeerPresent(p.sid), now)
 	}
@@ -356,6 +361,11 @@ func (e *Engine) onControlFrame(b []byte, v via) {
 }
 
 func (e *Engine) onControlFrom(p *peer, b []byte, v via) {
+	if v.kind == pathmgr.Direct && e.relayOnly() {
+		// Relay only: nothing is answered from the home address, not even a
+		// probe from a member that still knows it.
+		return
+	}
 	plain, err := wire.OpenControl(&p.recvKey, b)
 	if err != nil {
 		return
@@ -475,8 +485,22 @@ func (e *Engine) onHello(p *peer, m *peermsg.Hello) {
 	p.nick = m.Nickname
 	p.appVersion = m.AppVersion
 	p.remoteActive = m.ActiveNetwork
+	wasRelayOnly := p.remoteFlags&peermsg.FlagRelayOnly != 0
 	p.remoteFlags = m.Flags
+	peerRelayOnly := m.Flags&peermsg.FlagRelayOnly != 0
+	dropDirect := p.pm != nil && peerRelayOnly && len(p.directAddrsLocked()) > 0
+	if p.pm != nil {
+		p.pm.SetPeerRelayOnly(peerRelayOnly)
+	}
+	if wasRelayOnly && !peerRelayOnly {
+		p.candSentAt = time.Time{} // the peer takes direct paths again: offer ours now
+	}
 	p.mu.Unlock()
+	if dropDirect {
+		e.mu.Lock()
+		e.rebuildAddrMap()
+		e.mu.Unlock()
+	}
 
 	// Mutual friendship: we added them and they say they added us.
 	e.mu.Lock()

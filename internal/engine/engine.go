@@ -426,6 +426,9 @@ func (e *Engine) onPacket(b []byte, from netip.AddrPort) {
 			e.bind.Deliver(b, p.ep)
 			return
 		}
+		if e.relayOnly() {
+			return // Relay only: no tunnel traffic on the home address
+		}
 		e.bind.Deliver(b, &transport.RawEndpoint{Addr: from})
 	case wire.ClassRelayData, wire.ClassRelayControl:
 		if r := e.relayByAddr(from); r != nil {
