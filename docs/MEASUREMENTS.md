@@ -185,6 +185,28 @@ Not covered: playing a mission (the machine B blocks the game's renderer
 under Smart App Control, so missions stay black), long sessions, path
 changes during a game (RESILIENCE_PLAN.md).
 
+### Repeat with the installed 0.4.1 release build (D-034 to D-036)
+
+2026-11-05, 11:54-12:23, same two machines and lines. Both were upgraded
+from 0.4.0 with `Lanfolk-0.4.1-setup.exe`. On B the upgrade ran silently
+(`/VERYSILENT`) as the logged-in user; on A it ran with the setup window.
+Identity, friend code, network and settings were kept; Windows asked for no
+restart; the app on A showed the network and the member.
+
+A join now counts only when both lobbies show the joined player's green
+marker (read from screenshots). The TCP connections are no proof: DirectPlay
+opens them while it fills the session list. The first run's screenshots
+were checked the same way: all 32 showed the marker.
+
+| Result | Count |
+| --- | --- |
+| Game: session listed and joined, no retry | 32 of 32 |
+| lanprobe core tests, both directions | 32 of 32 PASS |
+| Global bcast (0.0.0.0), informational | 64 of 64 PASS |
+| Mcast (default interface), informational | FAIL exactly where the sender is in capture mode |
+| Path with Relay only off | direct in 8 of 8, at once (44-88 ms; one run 268 ms on the phone line) |
+| Path with Relay only on either side | shared relay on both sides in 24 of 24, 141-223 ms |
+
 ## Tunnel overhead (Phase 1, `lanprobe latency -compare`)
 
 Target: at most 1 ms p50 and 3 ms p99 over the raw path.

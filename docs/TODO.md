@@ -75,8 +75,10 @@ Last updated: 5 November 2026.
 - [ ] Ship D-034 (captured broadcasts get a fresh UDP checksum), D-035
       (Relay only holds for both directions; WireGuard does not roam) and
       D-036 (a peer's candidates restart failed direct paths).
-- [ ] Test 0.4.1 ourselves: install the release build over 0.4.0 on both
+- [x] Test 0.4.1 ourselves: install the release build over 0.4.0 on both
       lab machines, run the two-home matrix with the installed builds.
+      Result (5 November): both upgrades kept everything; 32 of 32 joined
+      with no retry, lanprobe core 32 of 32 both ways (MEASUREMENTS.md).
 - [x] Finish the two-home matrix (host side x capture/compat on each side x
       Relay only placement, lanprobe both ways and Commandos 2) and record
       it in MEASUREMENTS.md. Result (5 November): 32 of 32 joined, lanprobe
