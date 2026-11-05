@@ -445,6 +445,28 @@ func (m *Manager) Restart(now int64) {
 	}
 }
 
+// RetryDirect starts a probe burst at once on every direct path that does
+// not answer, instead of waiting for its backoff. The caller uses it when the
+// peer has just sent its candidates, which means the peer is probing too:
+// hole punching through two NATs needs both sides to send at the same time.
+// It reports whether any path was restarted.
+func (m *Manager) RetryDirect(now int64) bool {
+	if m.relayOnly() {
+		return false
+	}
+	restarted := false
+	for _, id := range m.order {
+		p := m.paths[id]
+		if p.kind != Direct || m.alive(p, now) {
+			continue
+		}
+		p.backoff = 0
+		m.startBurst(p, now)
+		restarted = true
+	}
+	return restarted
+}
+
 func (m *Manager) deadAfter(p *path) int64 {
 	if p == m.active {
 		return int64(m.cfg.DeadAfter)

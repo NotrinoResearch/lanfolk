@@ -435,6 +435,39 @@ func TestRelayOnlyOnOneSideStopsDirectTraffic(t *testing.T) {
 	waitFor(t, 15*time.Second, "direct path again", func() bool { return a.peer(b).Path == "direct" && b.peer(a).Path == "direct" })
 }
 
+// Two-home matrix, 5 November: twice the direct path came back only after
+// 7.5 minutes, the sum of the 30 s, 60 s, 120 s and 240 s retries. Once a
+// direct path had failed, a later Candidates message from the peer (sent on
+// a settings change and every minute) did not restart it, and hole punching
+// through two NATs needs both sides to probe at the same time.
+func TestPeerCandidatesRestartFailedDirectPaths(t *testing.T) {
+	r := startTestRelay(t)
+	a, b := newNode(t, "ahmet", r), newNode(t, "mehmet", r)
+	befriend(t, a, b)
+	createNetwork(t, a, b)
+	sendUntil(t, a, b, 9000, []byte("hello"))
+	waitFor(t, 10*time.Second, "direct path", func() bool { return a.peer(b).Path == "direct" && b.peer(a).Path == "direct" })
+
+	blockDirect(a, b) // the direct path dies; both sides fall back and back off
+	waitFor(t, 10*time.Second, "relay on both sides", func() bool {
+		return a.peer(b).Path == "shared-relay" && b.peer(a).Path == "shared-relay"
+	})
+	// A standby path is failed after 16 s of silence (StandbyDeadAfter); then
+	// its 3 s burst ends and the 30 s retry is pending.
+	time.Sleep(22 * time.Second)
+	a.e.Socket().SetFilter(nil)
+	b.e.Socket().SetFilter(nil)
+
+	// b sends its candidates, as it does after a settings change or once a
+	// minute. Both sides must probe at once instead of waiting 30 s.
+	pa := b.e.peerByKey(a.e.PublicKey())
+	pa.mu.Lock()
+	pa.candSentAt = time.Time{}
+	pa.mu.Unlock()
+	b.e.maybeSendCandidates(pa, time.Now())
+	waitFor(t, 6*time.Second, "direct path again", func() bool { return a.peer(b).Path == "direct" && b.peer(a).Path == "direct" })
+}
+
 func TestBroadcastAndBlockedPorts(t *testing.T) {
 	r := startTestRelay(t)
 	a, b, c := newNode(t, "ahmet", r), newNode(t, "mehmet", r), newNode(t, "veli", r)

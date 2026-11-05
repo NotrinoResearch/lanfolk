@@ -238,6 +238,31 @@ func TestRelayOnlySettingDropsActiveDirect(t *testing.T) {
 	}
 }
 
+func TestRetryDirectSkipsTheBackoff(t *testing.T) {
+	s := newSim(t, DefaultConfig())
+	r := s.m.SetSharedRelay(0, SharedRelay, true, s.now)
+	d, _ := s.m.AddDirect(addrA, SourceSTUN, s.now)
+	s.rtt[r] = 80 * time.Millisecond // d does not answer
+	s.run(5 * time.Second)           // burst over, d waits for its 30 s retry
+	sent := s.sent[d]
+	s.run(5 * time.Second)
+	if s.sent[d] != sent {
+		t.Fatal("setup: a failed direct path was probed during its backoff")
+	}
+	if !s.m.RetryDirect(s.now) {
+		t.Fatal("RetryDirect restarted nothing")
+	}
+	s.rtt[d] = 10 * time.Millisecond // the peer probes now too: the hole opens
+	s.run(2 * time.Second)
+	if s.sent[d] == sent || s.active().Kind != Direct {
+		t.Fatalf("direct path not retried at once (active %v)", s.active().Kind)
+	}
+	s.m.SetPeerRelayOnly(true)
+	if s.m.RetryDirect(s.now) {
+		t.Fatal("RetryDirect probed direct paths of a Relay only peer")
+	}
+}
+
 func TestMemberRelayVersusSharedAndTCPPenalty(t *testing.T) {
 	via, _ := identity.Generate()
 	s := newSim(t, DefaultConfig())

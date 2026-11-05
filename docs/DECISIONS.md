@@ -695,3 +695,29 @@ An engine test turns Relay only on at one side of a working direct pair.
 Both sides must then use the relay, and no packet may pass between the two
 home addresses for three seconds. Turning the setting off must bring the
 direct path back. The test fails on the code before this change.
+
+## D-036 A peer's candidates restart failed direct paths
+
+Date: 2026-11-05.
+
+In the two-home matrix the direct path twice came back only after 7.5
+minutes. The service log on the home-fiber machine showed the cause.
+That is the sum of the 30, 60, 120 and 240 s retries. Once a direct path
+had failed (here after a settings change on both sides), nothing restarted
+it early: Candidates from the peer, sent on a settings change and once a
+minute, were ignored for addresses already known. The hole through the
+phone line's NAT opens only when both sides probe at the same time, and the
+two sides retried on unrelated schedules.
+
+A Candidates message now restarts the probe burst on every direct path that
+does not answer, when no direct path is active, and the receiver answers with
+its own candidates so that both sides probe together. This is ICE's rule of
+reacting to the peer's checks instead of waiting for one's own timer. A
+limit of once per 5 s per peer prevents a ping-pong. With no direct path
+possible (two hard NATs), the cost is one 3 s burst per minute.
+
+An engine test blocks the direct path until both sides have failed it
+(22 s), unblocks it and lets one side send its candidates: both must be
+direct again within 6 s. It fails on the code before this change. The plan's
+item 2.4 (faster return after a short blip without any message from the
+peer) stays open.

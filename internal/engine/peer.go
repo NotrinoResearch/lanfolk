@@ -61,6 +61,7 @@ type peer struct {
 	remoteFlags  uint8
 	candGen      uint32
 	candSentAt   time.Time
+	punchAt      time.Time // last RetryDirect after the peer's candidates
 	reasm        *peermsg.Reassembler
 	offers       map[identity.KeyID]offer
 	pathVer      uint64

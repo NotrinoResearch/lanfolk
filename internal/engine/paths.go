@@ -202,12 +202,15 @@ func (e *Engine) maybeSendCandidates(p *peer, now time.Time) {
 	e.sendMsg(p, msg, nil)
 }
 
+// punchEvery limits how often a peer's candidates restart our direct probes.
+const punchEvery = 5 * time.Second
+
 func (e *Engine) onCandidates(p *peer, m *peermsg.Candidates) {
 	if e.relayOnly() {
 		return
 	}
 	now := nanotime()
-	added := false
+	added, punch := false, false
 	p.mu.Lock()
 	if p.pm != nil {
 		for _, c := range m.Addrs {
@@ -222,9 +225,17 @@ func (e *Engine) onCandidates(p *peer, m *peermsg.Candidates) {
 				added = true
 			}
 		}
+		// The peer probes its candidates now. If no direct path works, probe
+		// ours at the same time instead of waiting for the backoff, and send
+		// our candidates so the peer does the same (hole punching needs both
+		// sides at once). The limit stops a ping-pong between the two.
+		if a, ok := p.pm.Active(); (!ok || a.Kind != pathmgr.Direct) && time.Since(p.punchAt) > punchEvery {
+			p.punchAt = time.Now()
+			punch = p.pm.RetryDirect(now) || added
+		}
 	}
 	p.mu.Unlock()
-	if added {
+	if added || punch {
 		e.mu.Lock()
 		e.rebuildAddrMap()
 		e.mu.Unlock()

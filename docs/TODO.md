@@ -72,22 +72,24 @@ Last updated: 5 November 2026.
 
 ## Release 0.4.1
 
-- [ ] Ship D-034 (captured broadcasts get a fresh UDP checksum) and D-035
-      (Relay only holds for both directions; WireGuard does not roam).
+- [ ] Ship D-034 (captured broadcasts get a fresh UDP checksum), D-035
+      (Relay only holds for both directions; WireGuard does not roam) and
+      D-036 (a peer's candidates restart failed direct paths).
+- [ ] Test 0.4.1 ourselves: install the release build over 0.4.0 on both
+      lab machines, run the two-home matrix with the installed builds.
 - [x] Finish the two-home matrix (host side x capture/compat on each side x
       Relay only placement, lanprobe both ways and Commandos 2) and record
       it in MEASUREMENTS.md. Result (5 November): 32 of 32 joined, lanprobe
       core 32 of 32 in both directions.
-- [ ] Find why the path stayed on the relay for over 2 minutes in two matrix
+- [x] Find why the path stayed on the relay for over 2 minutes in two matrix
       runs after compatibility mode and Relay only had been switched
-      (MEASUREMENTS.md, two-home matrix).
+      (MEASUREMENTS.md, two-home matrix). Cause and fix: D-036.
 - [ ] Diagnostic report: detect Windows Firewall block rules for programs
       (a "Cancel" on the firewall prompt creates them, and they win over
       Lanfolk's allow rule) and tell the user how to remove them.
 - [ ] Capture mode does not forward multicast sent to the default
       interface (lanprobe "Mcast (default)" fails on the capture side).
       Decide whether capture should cover it like global broadcast.
-- [ ] Repeat the two-home Commandos 2 test with osman on 0.4.1.
 
 ## Release 0.5.0: connection resilience
 
