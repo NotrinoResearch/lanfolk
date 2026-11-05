@@ -114,6 +114,12 @@ Last updated: 5 November 2026.
       router listed and joined a session with the installed release build.
 - [ ] Short game test with osman on 0.4.3 (he only installs the update;
       nothing to change on his side).
+- [ ] Installer: a failed upgrade leaves Lanfolk without its service. Seen
+      5 November: `lanprobe serve` was running, setup could not replace
+      lanprobe.exe and rolled the files back, but the old service had
+      already been removed in ssInstall, so nothing ran until setup was
+      started again. Close lanprobe and natprobe like the UI, and register
+      and start the service again when setup is cancelled or rolled back.
 - [ ] Put the lab VM and the fake router into TESTING.md and a script, so
       the UPnP case is part of the matrix.
 
