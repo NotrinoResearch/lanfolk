@@ -577,6 +577,34 @@ func TestInjectLocalBroadcastZeroChecksumStaysZero(t *testing.T) {
 	}
 }
 
+// Windows hands the loopback copy of a locally sent datagram to the capture
+// socket before checksum offload has filled in the UDP checksum: the field
+// holds only the folded pseudo-header sum (measured on Windows 11 for a
+// DirectPlay 4 announce and for a plain probe, D-034). The copy sent to the
+// peers must carry a correct checksum, or the receiving stack drops it.
+func TestInjectLocalBroadcastOffloadPlaceholderChecksum(t *testing.T) {
+	e := newEnv(t, nil, addrB)
+	local := netip.MustParseAddr("192.168.0.19")
+	pkt := udpPkt(local, addrGlobal, 59161, 47624, "play\x02\x00\x0e\x00 enum sessions")
+	udp := pkt[20:]
+	src, dst := local.As4(), addrGlobal.As4()
+	var pseudo uint64
+	pseudo += uint64(binary.BigEndian.Uint16(src[0:])) + uint64(binary.BigEndian.Uint16(src[2:]))
+	pseudo += uint64(binary.BigEndian.Uint16(dst[0:])) + uint64(binary.BigEndian.Uint16(dst[2:]))
+	pseudo += protoUDP + uint64(len(udp))
+	binary.BigEndian.PutUint16(udp[6:], csumFold(pseudo))
+	if udpChecksumValid(src, dst, udp) {
+		t.Fatal("test packet: placeholder checksum must be invalid")
+	}
+	e.d.InjectLocalBroadcast(pkt)
+	got := e.readOne(t)
+	s, d, payload := mustUDP(t, got[24:]) // fails on an invalid UDP checksum
+	if s != netip.AddrPortFrom(addrSelf, 59161) || d != netip.AddrPortFrom(addrGlobal, 47624) ||
+		string(payload) != "play\x02\x00\x0e\x00 enum sessions" {
+		t.Fatalf("got %v -> %v %q", s, d, payload)
+	}
+}
+
 func TestInjectLocalBroadcastDropRules(t *testing.T) {
 	e := newEnv(t, nil, addrB)
 	loopback := netip.MustParseAddr("127.0.0.1")

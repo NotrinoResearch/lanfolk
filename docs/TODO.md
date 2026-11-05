@@ -5,7 +5,7 @@ and write the result where the item says (usually
 [MEASUREMENTS.md](MEASUREMENTS.md)). How to run each test is in
 [TESTING.md](TESTING.md).
 
-Last updated: 4 November 2026.
+Last updated: 5 November 2026.
 
 ## Tests that need people, lines or hardware
 
@@ -109,6 +109,18 @@ Last updated: 4 November 2026.
       relay; not confirmed.
 - [ ] Network impairment tests with added delay (netem) need a Linux host;
       WSL2 does not support netem.
+- [ ] A joiner whose invite was dropped (the owner removed a member, D-033)
+      waits forever without an error. The owner should answer with "invite
+      no longer valid" and the app should say so.
+- [ ] `lanfolk-cli settings set` has no key for "Let members reach Windows
+      services" (`allow_services`); only the app and the pipe can set it.
+- [ ] Members that also share a physical LAN receive a global broadcast twice
+      (over the LAN and through Lanfolk). Most games answer the first copy, so
+      they may connect over the physical LAN. Consider a hint in the
+      diagnostic report.
+- [ ] `lanprobe test` reports "Global bcast (0.0.0.0)" as informational. Since
+      D-034 it should pass in capture mode; make it a core check once the
+      two-home matrix confirms it.
 
 ## Product ideas, not planned yet
 

@@ -8,7 +8,7 @@ Lanfolk does not know games. It contains no game names, profiles or per-game por
 | --- | --- | --- | --- |
 | TCP and UDP unicast | Direct connections to a host | Every member has a virtual IP in `10.77.0.0/24`; all ports and both protocols pass through the tunnel, except the blocked system ports below | First release |
 | Subnet broadcast (`10.77.0.255`) | LAN game discovery | Datagrams sent to the subnet broadcast address reach the adapter, are copied to every online member as LanFrames and delivered with the sender's virtual IP as source | First release |
-| Global broadcast (`255.255.255.255`) | Server browsers, discovery | Windows sends these through the preferred interface only. Lanfolk captures them by default (capture mode); compatibility mode lowers the adapter metric so Windows uses the virtual adapter | First release |
+| Global broadcast (`255.255.255.255`) | Server browsers, discovery | Windows sends these through the preferred interface only. Lanfolk captures the local copy by default (capture mode) and sends it to every online member with the sender's virtual IP as source and a recomputed checksum (D-034); compatibility mode lowers the adapter metric so Windows uses the virtual adapter | First release |
 | Multicast | Local discovery protocols (for example `239.x.x.x`) | Group traffic on the adapter is copied to online members as LanFrames. Compatibility mode helps when Windows chooses another interface for the group | First release |
 | IP address in the payload | Games or protocols that announce their own IP | The game must announce the virtual IP. Compatibility mode makes the virtual adapter the preferred interface, which helps these protocols choose the virtual IP | First release |
 | Private IP checks | Games that accept only LAN addresses | `10.77.0.0/24` is a private (RFC 1918) range | First release |
@@ -39,6 +39,6 @@ Players and testers may report games they tried. This table is a record of repor
 
 | Game | Version / date | Behavior class(es) used | Result | Notes |
 | --- | --- | --- | --- | --- |
-| | | | | |
+| Commandos 2: Men of Courage (DirectPlay 4) | 2026-11-05, Lanfolk 0.4.1 development build | Discovery by global broadcast (UDP 47624), TCP 2300, UDP 2350 | Works between two homes, capture and compatibility mode | Lanfolk 0.4.0 found no session in capture mode (D-034) |
 
 To add a row, open an issue or a pull request with the game, the result, which behaviors it uses (discovery by broadcast, join by IP, and so on), whether compatibility mode was needed, and the `lanprobe test` result. Do not include IP addresses or friend codes.

@@ -198,6 +198,25 @@ func setSource(pkt []byte, h *ipv4Header, src [4]byte) {
 	binary.BigEndian.PutUint16(pkt[10:], ipChecksum(pkt[:h.ihl]))
 }
 
+// recomputeUDPChecksum computes the UDP checksum of an unfragmented datagram
+// (parsed as h) from scratch. A zero field ("no checksum") stays zero.
+//
+// It is needed for packets captured from the loopback path: Windows hands
+// over the copy of a locally sent datagram before checksum offload has run,
+// so the field holds only the pseudo-header sum, and an incremental update
+// (setSource) would keep it wrong (D-034).
+func recomputeUDPChecksum(pkt []byte, h *ipv4Header) {
+	if h.proto != protoUDP || h.fragmented() || h.ihl+udpHdrLen > h.total {
+		return
+	}
+	udp := pkt[h.ihl:h.total]
+	if binary.BigEndian.Uint16(udp[6:]) == 0 {
+		return
+	}
+	udp[6], udp[7] = 0, 0
+	binary.BigEndian.PutUint16(udp[6:], udpChecksum(h.src, h.dst, udp))
+}
+
 // BuildUDP4 returns a valid IPv4 UDP packet (DF set, header and UDP checksums
 // filled in). It returns nil if the payload does not fit into one packet.
 func BuildUDP4(src, dst netip.AddrPort, ttl uint8, payload []byte) []byte {

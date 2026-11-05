@@ -646,6 +646,7 @@ func (d *Device) handleInjected(p *pbuf, em *emitter) {
 		return
 	}
 	setSource(pkt, &h, self)
+	recomputeUDPChecksum(pkt, &h)
 	d.fanOut(pkt, &h, self, em)
 }
 

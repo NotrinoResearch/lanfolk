@@ -630,3 +630,34 @@ them adds a prompt, and none changes the wire protocol between clients.
   0.4 ignore the cookie request, so they cannot open new UDP sessions while a
   relay is under attack; their existing sessions and the TCP fallback keep
   working.
+
+## D-034 Captured broadcasts get a fresh UDP checksum
+
+Date: 2026-11-05.
+
+Commandos 2 (DirectPlay 4) found no sessions between two homes in the default
+capture mode. DirectPlay sends its session enumeration from a socket bound to
+`0.0.0.0` to `255.255.255.255:47624`, so Windows sends it out of the
+physical adapter and Lanfolk picks up the loopback copy on `127.0.0.1` with
+`SIO_RCVALL` (capture mode). That copy is taken before checksum offload has
+run: its UDP checksum field holds only the folded pseudo-header sum that the
+network card is meant to complete. Lanfolk rewrote the source address with an
+incremental checksum update, which keeps a wrong checksum wrong, and the
+receiving Windows dropped every captured datagram silently. This is also why
+`lanprobe test` showed "Global bcast (0.0.0.0)" as FAIL without compatibility
+mode (MEASUREMENTS.md); it was taken for a Windows routing limit.
+
+Captured datagrams now get their UDP checksum computed from scratch after the
+source rewrite (a zero field, "no checksum", stays zero). The cost is one pass
+over the datagram for captured broadcasts only; packets read from the virtual
+adapter keep the incremental update. A unit test feeds a datagram with the
+offload placeholder and checks that the delivered copy has a valid checksum.
+
+Checked between two homes (one machine on a phone hotspot, the other on home
+fiber) with Commandos 2: before the fix no session was listed in capture
+mode; with it the session is listed and joining, the lobby and commando
+selection work. Compatibility mode worked before and after.
+
+DirectPlay 4 takes the peer addresses from the packet sources and does not
+carry physical IP addresses in its payload, so the "IP address in the
+payload" class did not apply.
