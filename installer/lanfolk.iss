@@ -272,7 +272,7 @@ var
   TaskKill: String;
   ResultCode: Integer;
 begin
-  TaskKill := ExpandConstant('{sys}	askkill.exe');
+  TaskKill := ExpandConstant('{sys}\taskkill.exe');
   Exec(TaskKill, '/F /IM lanprobe.exe /IM natprobe.exe /IM lanfolk-cli.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 end;
 
@@ -473,7 +473,7 @@ var
 begin
   if (not OldServiceRemoved) or FilesInstalled then
     Exit;
-  Exe := ExpandConstant('{app}') + ServiceExeName;
+  Exe := AddBackslash(ExpandConstant('{app}')) + ServiceExeName;
   if not FileExists(Exe) then
   begin
     Log('Setup did not finish and ' + Exe + ' is missing; the service cannot be restored.');
