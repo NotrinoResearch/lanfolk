@@ -112,16 +112,23 @@ Last updated: 5 November 2026.
       identity and network kept, no restart asked, the service turned
       DirectPlay's UPnP off by itself; Commandos 2 behind the fake UPnP
       router listed and joined a session with the installed release build.
-- [ ] Short game test with osman on 0.4.3 (he only installs the update;
-      nothing to change on his side).
-- [ ] Installer: a failed upgrade leaves Lanfolk without its service. Seen
-      5 November: `lanprobe serve` was running, setup could not replace
-      lanprobe.exe and rolled the files back, but the old service had
-      already been removed in ssInstall, so nothing ran until setup was
-      started again. Close lanprobe and natprobe like the UI, and register
-      and start the service again when setup is cancelled or rolled back.
+- [x] Short game test with osman: moved to 0.4.4, which also has D-038.
 - [ ] Put the lab VM and the fake router into TESTING.md and a script, so
       the UPnP case is part of the matrix.
+
+## Release 0.4.4
+
+- [x] Turn off Lanfolk from the tray (D-039). Lab VM, 5 November: the menu
+      item closed the window, the Settings window and the tray icon; the
+      service stopped and stayed stopped (no recovery restart, still
+      automatic); DirectPlay's setting was restored. Opening Lanfolk without
+      elevation started the service again; after a restart of Windows the
+      service, the app and the network came back by themselves.
+- [x] A failed upgrade no longer leaves Lanfolk without its service (seen 5
+      November with a running `lanprobe serve`). Lab VM: 0.4.3 to 0.4.4 with
+      `lanprobe serve` running succeeded; a setup forced to fail on a locked
+      file rolled back and registered and started the service again.
+- [ ] Short game test with osman on 0.4.4.
 
 ## Release 0.5.0: connection resilience
 
