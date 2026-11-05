@@ -95,8 +95,11 @@ Last updated: 5 November 2026.
 
 ## Release 0.4.2
 
-- [ ] Ship D-037 (announced nicknames survive a restart): build, upgrade
-      both lab machines from 0.4.1, check the names and a short two-home run.
+- [x] Ship D-037 (announced nicknames survive a restart). Built and upgraded
+      the home-fiber lab machine from 0.4.1 silently (5 November): identity,
+      network, settings and friends kept, no restart asked.
+- [ ] Two-home game test with osman on 0.4.1 or 0.4.2 (he updates through
+      the in-app notice).
 
 ## Release 0.5.0: connection resilience
 
