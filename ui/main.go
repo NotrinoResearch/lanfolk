@@ -79,6 +79,10 @@ func main() {
 		tr = newTray(app, host)
 	}
 
+	// A running instance that does not respond would swallow this start
+	// (see instance_windows.go); end it first so this one takes over.
+	endHungInstance(id+ws.InstanceSuffix, windowClassFor(*settings))
+
 	bg := &options.RGBA{R: 243, G: 243, B: 243, A: 255}
 	if systemUsesDarkTheme() {
 		bg = &options.RGBA{R: 32, G: 32, B: 32, A: 255}

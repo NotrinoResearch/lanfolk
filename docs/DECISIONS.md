@@ -851,3 +851,33 @@ in use (a running `lanprobe serve` was seen) Setup rolled back but the
 service stayed removed. Setup now ends Lanfolk's command-line tools with the
 app, and when it fails or is cancelled after removing the service it
 registers and starts the service of the files that remain.
+
+## D-040 Opening Lanfolk replaces a window that does not respond
+
+Date: 2026-11-05.
+
+During the 0.4.4 game test a CPU-heavy job on the host starved the app's
+WebView2: the Settings window stayed blank, the main window stopped
+responding and starting Lanfolk again showed nothing. The service, which
+runs at high priority, kept working.
+
+Starting Lanfolk while it runs uses Wails' single instance lock: the new
+process finds the running instance's hidden lock window, sends it the start
+with `SendMessage` and exits. `SendMessage` waits until the receiving thread
+handles the message, so with a frozen instance the new process waited
+invisibly as well. Reproduced with 0.4.4 by suspending a running Lanfolk.exe
+and starting it again: the new process stayed without a window until the old
+one was resumed.
+
+Decision: before the lock, a starting Lanfolk.exe looks for a running
+instance of the same kind (main window or Settings). If its lock window or
+its main window does not answer a `WM_NULL` within 5 seconds
+(`SendMessageTimeout` with `SMTO_ABORTIFHUNG`), and the process runs the same
+executable, it is ended and the new start takes over. The app is only a
+client of the service (setup ends it the same way), so nothing is lost; the
+old tray icon disappears when the mouse passes over it. A responsive
+instance answers at once, so starting Lanfolk is not slower.
+
+Rejected: changing Wails' lock to `SendMessageTimeout` (a fork of the
+dependency for one call), and a watchdog inside the app (a frozen app cannot
+be relied on to notice it is frozen).
