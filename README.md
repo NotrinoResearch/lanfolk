@@ -63,6 +63,59 @@ when a game doesn't find the other players.
 - There are no accounts. Your identity is a key on your computer, and only
   people with your invite can join your network.
 
+## How it compares
+
+Hamachi, Radmin VPN, ZeroTier and Tailscale also put computers on a private
+network. This is how they differ for a group of friends playing LAN games,
+checked against the vendors' own pages in November 2026. Prices and limits
+change often; follow the sources below before you decide, and open an issue
+if something here is wrong.
+
+| | Lanfolk | Hamachi | Radmin VPN | ZeroTier | Tailscale |
+| --- | --- | --- | --- | --- | --- |
+| Cost for a group of friends | Free | Free up to 5 per network; $49/year for up to 32 | Free | Free up to 10 devices and 1 network; paid from $18/month | Free up to 6 users; then $8 per user/month |
+| Members per network | 253 | 5 free, up to 256 paid | Not stated | 10 free | 6 users free |
+| Account | None: your identity is a key on your PC | LogMeIn ID for managed networks | None | Creator needs one; joiners don't | Everyone, through Google, Microsoft, GitHub and similar logins |
+| How friends join | Invite code | Network ID and password | Network name and password | Network ID, then the owner approves | Invite link |
+| Platforms | Windows 10 and 11 | Windows, macOS, Linux | Windows | Windows, macOS, Linux, Android, iOS | Windows, macOS, Linux, Android, iOS and more |
+| LAN broadcast (old games' server lists) | Yes, including games that broadcast through the wrong adapter | Yes | Yes, by user reports | Yes | No |
+| Multicast | Yes | Unclear | Unclear | Yes, with a recipient limit | No |
+| Fixes for specific games | DirectPlay games behind UPnP routers ([D-038](docs/DECISIONS.md)) | None documented | None documented | None documented | None documented |
+| When a direct connection fails | Through another member, then a relay over UDP or TCP | LogMeIn relays; faster relays advertised for paid plans | "Relay/TCP" | ZeroTier's roots, documented as slow | Peer relays, then Tailscale's DERP relays |
+| Encryption | WireGuard, end to end; relays cannot read it | AES-256-CBC, HMAC-SHA1 | "AES-256 end-to-end", no details published | Salsa20/Poly1305, end to end, no forward secrecy | WireGuard, end to end |
+| Run your own server | Relay (Docker); no control server exists | No | No | Controller and roots (controller non-commercial license) | Relays; control server only through the community project Headscale |
+| Source code | Public, PolyForm Noncommercial (source available, not OSI open source) | Closed | Closed | Agent MPL-2.0, controller source available | Client core BSD-3-Clause, control server closed |
+| Commercial use without paying | No, needs a license | Not stated | Not restricted by the EULA | No | No |
+| Maturity | Beta; installer not code signed yet; one shared relay | Established | Established | Established | Established |
+
+Where Lanfolk is weaker: it runs only on Windows, it is a young beta with few
+games tested so far ([COMPATIBILITY.md](docs/COMPATIBILITY.md)), the
+virtual network carries IPv4 only, and its free relay is a single server.
+Tailscale and ZeroTier are the better choice for reaching your own devices
+from a phone or a Mac; Lanfolk is built for the LAN modes of PC games.
+
+<details>
+<summary>Sources</summary>
+
+- Hamachi: [plans and prices](https://vpn.net/), [security](https://www.vpn.net/security),
+  [getting started guide (2016; broadcast, relays)](https://lmistatic.blob.core.windows.net/document-library/logmein/pdf/en/hamachi-getting-started-guide.pdf),
+  [clients and accounts](https://lmi-documentation-origin.azurewebsites.net/webhelp/EN/CentralUserGuide/LogMeIn/c_hamachi_AboutClients.html).
+  Multicast and commercial-use terms are not documented on pages we could read.
+- Radmin VPN: [home page](https://www.radmin-vpn.com/), [help](https://www.radmin-vpn.com/help/),
+  [security](https://www.radmin-vpn.com/security/), [EULA](https://www.radmin-vpn.com/eula/).
+  Broadcast support rests on user reports; the vendor states no network size limit.
+- ZeroTier: [pricing](https://www.zerotier.com/pricing/), [protocol](https://docs.zerotier.com/protocol/),
+  [relaying](https://docs.zerotier.com/relay), [self-hosting](https://docs.zerotier.com/selfhosting),
+  [source and licenses](https://github.com/zerotier/ZeroTierOne).
+- Tailscale: [pricing](https://tailscale.com/pricing), [connection types](https://tailscale.com/kb/1257/connection-types),
+  [sign-in providers](https://tailscale.com/kb/1010/sso-providers), [custom DERP](https://tailscale.com/kb/1118/custom-derp-servers),
+  [open source](https://tailscale.com/opensource),
+  [multicast feature request (open)](https://github.com/tailscale/tailscale/issues/11134).
+- Lanfolk: [protocol](docs/PROTOCOL.md), [LAN compatibility](docs/COMPATIBILITY.md),
+  [decisions](docs/DECISIONS.md), [license](LICENSING.md).
+
+</details>
+
 ## Is it free?
 
 Yes, for personal and other noncommercial use. Lanfolk is made by
