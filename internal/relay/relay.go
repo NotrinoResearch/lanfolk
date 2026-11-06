@@ -466,6 +466,18 @@ func (s *Server) handleControl(b []byte, src endpoint) {
 // with a different token wants to join a full session.
 func (s *Server) staleParty() int64 { return int64(s.cfg.IdleTimeout / 4) }
 
+// sameEndpoint returns the slot of the party registered from src, or -1.
+// Two parties of one session never share an address: one socket is one
+// client. s.mu must be held.
+func sameEndpoint(sess *session, src endpoint) int {
+	for i, p := range sess.parties {
+		if p != nil && p.ep.equal(src) {
+			return i
+		}
+	}
+	return -1
+}
+
 func (s *Server) register(m wire.RelayControl, src endpoint) {
 	now := time.Now().UnixNano()
 	var notify endpoint
@@ -529,9 +541,32 @@ func (s *Server) register(m wire.RelayControl, src endpoint) {
 			s.untrackTCP(p.ep, sess.id)
 			p.ep = src
 			s.trackTCP(src, sess.id)
+			// The other slot can hold an earlier run of this client that
+			// used the address before (see takeover below).
+			if o := sess.parties[1-idx]; o != nil && o.ep.equal(src) {
+				s.removePartyLocked(sess, 1-idx)
+				s.metrics.takeovers.Add(1)
+			}
 		}
 		p.lastSeen.Store(now)
 		present = sess.parties[1-idx] != nil
+	case sameEndpoint(sess, src) >= 0:
+		// A new token from the address of a registered party: the client
+		// restarted on the same socket without its Unregister reaching us
+		// (killed, crashed, power cut). Its earlier run is gone, so the new
+		// run takes the slot. Otherwise the old party stays, data from the
+		// address keeps it fresh (data is matched by address) and the other
+		// side is told SessionFull for as long as the client runs (D-041).
+		idx := sameEndpoint(sess, src)
+		p := sess.parties[idx]
+		p.token = m.Token
+		p.lastSeen.Store(now)
+		s.metrics.takeovers.Add(1)
+		if o := sess.parties[1-idx]; o != nil {
+			present = true
+			// The other side learns at once that a new run is there.
+			notify, doNotify = o.ep, true
+		}
 	default:
 		free := -1
 		for i, p := range sess.parties {

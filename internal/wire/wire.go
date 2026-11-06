@@ -9,6 +9,7 @@ import (
 	"errors"
 	"io"
 	"net/netip"
+	"strconv"
 
 	"github.com/NotrinoResearch/lanfolk/internal/stun"
 	"golang.org/x/crypto/chacha20poly1305"
@@ -161,6 +162,25 @@ const (
 	RejectBusy         byte = 5
 	RejectVersion      byte = 6
 )
+
+// RejectReason names a reject code for logs and diagnostics.
+func RejectReason(code byte) string {
+	switch code {
+	case RejectBadRequest:
+		return "bad request"
+	case RejectSessionLimit:
+		return "session limit for this address"
+	case RejectSessionFull:
+		return "session full"
+	case RejectRateLimited:
+		return "rate limited"
+	case RejectBusy:
+		return "relay busy"
+	case RejectVersion:
+		return "unsupported version"
+	}
+	return "code " + strconv.Itoa(int(code))
+}
 
 // RelayControl is a decoded relay control message.
 type RelayControl struct {

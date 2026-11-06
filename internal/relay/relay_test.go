@@ -181,6 +181,119 @@ func TestPartyRoamsWithSameToken(t *testing.T) {
 	}
 }
 
+// expectData waits for relayed data with payload want on c.
+func expectData(t *testing.T, c *udpClient, want string) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		b := c.recv(time.Until(deadline))
+		if b == nil {
+			break
+		}
+		if _, p, ok := wire.ParseRelayData(b); ok && string(p) == want {
+			return
+		}
+	}
+	t.Fatalf("data %q not delivered", want)
+}
+
+// noData reports a failure if relayed data arrives on c within d.
+func noData(t *testing.T, c *udpClient, d time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(d)
+	for time.Now().Before(deadline) {
+		b := c.recv(time.Until(deadline))
+		if b == nil {
+			return
+		}
+		if _, p, ok := wire.ParseRelayData(b); ok {
+			t.Fatalf("unexpected data %q", p)
+		}
+	}
+}
+
+// 6 November: a client restarted on the same UDP port without its Unregister
+// reaching the relay while its friend was offline. The new run registered
+// next to the old one, its own traffic (matched by address) kept the old
+// party fresh, and the friend was told SessionFull for as long as the client
+// ran; the client's frames came back to itself (D-041).
+func TestRestartOnSameAddressTakesOverItsSlot(t *testing.T) {
+	s := startServer(t, func(c *Config) { c.IdleTimeout = 2 * time.Second })
+	z, o := newUDPClient(t, s), newUDPClient(t, s)
+	z.send(wire.AppendRegister(nil, sidA, wire.Token{1}))
+	z.recvControl(wire.RelayRegisterAck)
+	// Killed; the next run uses the same socket address and a new token.
+	z.send(wire.AppendRegister(nil, sidA, wire.Token{2}))
+	if m := z.recvControl(wire.RelayRegisterAck); m.PeerPresent {
+		t.Fatal("the new run sees its own earlier run as the peer")
+	}
+	// The new run keeps talking (Hellos), more often than staleParty.
+	z.send(wire.AppendRelayData(nil, sidA, []byte("hello")))
+	noData(t, z, 300*time.Millisecond)
+	z.send(wire.AppendRelayData(nil, sidA, []byte("hello")))
+	o.send(wire.AppendRegister(nil, sidA, wire.Token{3}))
+	if m := o.recvControl(wire.RelayRegisterAck); !m.PeerPresent {
+		t.Fatal("friend registered but the client is not present")
+	}
+	z.recvControl(wire.RelayPeerJoined)
+	z.send(wire.AppendRelayData(nil, sidA, []byte("z")))
+	expectData(t, o, "z")
+	o.send(wire.AppendRelayData(nil, sidA, []byte("o")))
+	expectData(t, z, "o")
+	// The dead run's Unregister, if it arrives late, does not remove the
+	// new run.
+	z.send(wire.AppendUnregister(nil, sidA, wire.Token{1}))
+	o.send(wire.AppendRelayData(nil, sidA, []byte("o2")))
+	expectData(t, z, "o2")
+	if got := s.metrics.takeovers.Load(); got != 1 {
+		t.Fatalf("takeovers = %d", got)
+	}
+}
+
+func TestRestartOnSameAddressWhilePeerPresent(t *testing.T) {
+	s := startServer(t, nil)
+	z, o := newUDPClient(t, s), newUDPClient(t, s)
+	z.send(wire.AppendRegister(nil, sidA, wire.Token{1}))
+	z.recvControl(wire.RelayRegisterAck)
+	o.send(wire.AppendRegister(nil, sidA, wire.Token{3}))
+	o.recvControl(wire.RelayRegisterAck)
+	z.recvControl(wire.RelayPeerJoined)
+	z.send(wire.AppendRegister(nil, sidA, wire.Token{2}))
+	if m := z.recvControl(wire.RelayRegisterAck); !m.PeerPresent {
+		t.Fatal("peer not present after the restart")
+	}
+	// The friend hears about the new run at once (it sends a Hello).
+	o.recvControl(wire.RelayPeerJoined)
+	// The old token is gone: a refresh with it is a new party, and the
+	// session is full of fresh parties.
+	z2 := newUDPClient(t, s)
+	z2.send(wire.AppendRegister(nil, sidA, wire.Token{1}))
+	if m := z2.recvControl(wire.RelayReject); m.Code != wire.RejectSessionFull {
+		t.Fatalf("code %d", m.Code)
+	}
+}
+
+func TestRoamingOntoTheOtherSlotsAddressReplacesIt(t *testing.T) {
+	s := startServer(t, nil)
+	a, b, c := newUDPClient(t, s), newUDPClient(t, s), newUDPClient(t, s)
+	a.send(wire.AppendRegister(nil, sidA, wire.Token{1}))
+	a.recvControl(wire.RelayRegisterAck)
+	b.send(wire.AppendRegister(nil, sidA, wire.Token{2}))
+	b.recvControl(wire.RelayRegisterAck)
+	// Token 2 now comes from a's address: a's run is gone, its address
+	// belongs to token 2's client.
+	a.send(wire.AppendRegister(nil, sidA, wire.Token{2}))
+	if m := a.recvControl(wire.RelayRegisterAck); m.PeerPresent {
+		t.Fatal("a party at the same address is still counted as the peer")
+	}
+	c.send(wire.AppendRegister(nil, sidA, wire.Token{3}))
+	if m := c.recvControl(wire.RelayRegisterAck); !m.PeerPresent {
+		t.Fatal("new party not admitted")
+	}
+	c.send(wire.AppendRelayData(nil, sidA, []byte("c")))
+	expectData(t, a, "c")
+}
+
 func TestPerIPSessionLimit(t *testing.T) {
 	s := startServer(t, func(c *Config) { c.MaxSessionsPerIP = 3 })
 	a := newUDPClient(t, s)

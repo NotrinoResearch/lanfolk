@@ -327,10 +327,10 @@ func (e *Engine) shutdown() {
 	for _, p := range e.peers {
 		e.sendBye(p)
 	}
-	e.stopTunnelLocked()
-	// Free the session slots at once. Otherwise the relay keeps the old
-	// registration (a second party for the same session) until it is stale,
-	// and a restarted client would be rejected as SessionFull meanwhile.
+	// Free the session slots at once, before anything slow: setup ends a
+	// service that has not exited after 5 seconds, and closing the adapter
+	// can take a while. A registration left behind holds a slot until it is
+	// stale (D-041).
 	for _, r := range e.relays {
 		for _, p := range e.peers {
 			r.client.Unregister(p.sid)
@@ -339,6 +339,7 @@ func (e *Engine) shutdown() {
 			r.client.Unregister(sid)
 		}
 	}
+	e.stopTunnelLocked()
 	for _, r := range e.relays {
 		r.stop()
 	}

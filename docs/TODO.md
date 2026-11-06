@@ -140,6 +140,15 @@ Last updated: 5 November 2026.
       replaced within the 5 s check; with a responsive app a new start still
       showed the running window and exited (0.4 s).
 
+## Release 0.4.6
+
+- [x] A client restarted on the same address without unregistering no
+      longer locks its friend out of their relay session (D-041). Reproduced
+      in a relay test and an engine test (both fail on the old relay); the
+      relay fix also helps released clients.
+- [ ] Shared relay updated with the takeover (relay image 0.2.1).
+- [ ] Two-home check with osman after the relay update.
+
 ## Release 0.5.0: connection resilience
 
 The plan, targets and order are in [RESILIENCE_PLAN.md](RESILIENCE_PLAN.md).

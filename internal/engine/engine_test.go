@@ -349,6 +349,39 @@ func TestRenameShowsInMemberAndFriendLists(t *testing.T) {
 // 5 November: after the service restarted, an offline friend who had renamed
 // himself showed the name he had when he joined ("Player-241D"), because the
 // announced nickname lived only in memory.
+func friendOnline(n, other *node) bool {
+	for _, f := range n.e.Friends() {
+		if f.PublicKey == other.e.PublicKey().Hex() {
+			return f.Online
+		}
+	}
+	return false
+}
+
+// 6 November (D-041): zikici's service ended without its Unregister reaching
+// the relay while osman was offline, and started again on the same UDP port.
+// Its new registration sat next to the old one, its own Hellos kept the old
+// one fresh, and osman was told SessionFull: both stayed "offline" while
+// connected to the relay, until both removed each other.
+func TestKilledClientRestartedOnSamePortReachesOfflineFriend(t *testing.T) {
+	r := startTestRelay(t)
+	a, b := newNode(t, "zikici", r), newNode(t, "osman", r)
+	befriend(t, a, b) // a registers the pair session first
+	b.stop()          // osman goes offline
+	port := a.e.Port()
+	relayAddr := r.srv.UDPAddr()
+	// zikici is killed: nothing it sends on the way out reaches the relay.
+	a.e.Socket().SetFilter(func(x netip.AddrPort) bool { return x == relayAddr })
+	a.stop()
+	a2 := newNodeIn(t, "zikici", r, a.dir, func(c *Config) { c.ListenAddr = netip.AddrPortFrom(netip.MustParseAddr("127.0.0.1"), port).String() })
+	if a2.e.Port() != port {
+		t.Fatalf("restarted on port %d, want %d", a2.e.Port(), port)
+	}
+	time.Sleep(1500 * time.Millisecond) // registers and greets the offline friend
+	b2 := newNodeIn(t, "osman", r, b.dir, nil)
+	waitFor(t, 8*time.Second, "both online again", func() bool { return friendOnline(a2, b2) && friendOnline(b2, a2) })
+}
+
 func TestRenamedMemberKeepsNameAfterRestart(t *testing.T) {
 	r := startTestRelay(t)
 	a, b := newNode(t, "ahmet", r), newNode(t, "mehmet", r)

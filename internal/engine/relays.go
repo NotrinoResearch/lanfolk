@@ -148,6 +148,17 @@ func (e *Engine) startRelay(w relayConn) *relayConn {
 				go e.sendJoinRequest(is, true)
 			}
 		},
+		OnReject: func(sid wire.SessionID, code byte) {
+			// Logged once per change; the client retries on its own. A peer
+			// whose session stays full cannot be reached through this
+			// relay (D-041).
+			if p := e.peerBySID(sid); p != nil {
+				e.log.Warn("relay refused the session with a peer", "relay", r.name(), "peer", p.displayName(),
+					"reason", wire.RejectReason(code))
+			} else if e.inviteSession(sid) != nil {
+				e.log.Info("relay refused an invite session", "relay", r.name(), "reason", wire.RejectReason(code))
+			}
+		},
 		OnObserved:   func(netip.AddrPort) { go e.refreshCandidates(true) },
 		OnModeChange: func(transport.Mode) { go e.publishStatus() },
 	}

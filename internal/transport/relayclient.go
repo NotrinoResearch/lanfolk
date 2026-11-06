@@ -61,7 +61,18 @@ type sessState struct {
 	cookie       wire.Cookie
 	cookieAt     time.Time
 	cookieAnswer time.Time // last Register sent in answer to a Challenge
+
+	// The relay's last Reject of this session's Register; cleared by an
+	// Ack.
+	rejectCode byte
+	rejectAt   time.Time
 }
+
+// fullRetry is how soon a session the relay rejected as full is registered
+// again. The relay frees a slot whose party has been silent for a quarter of
+// its idle timeout (30 s by default), so retrying at the normal refresh
+// interval could add another 30 s of waiting.
+const fullRetry = 10 * time.Second
 
 // cookieFresh is how long a Challenge cookie is sent along with refreshes.
 // The relay accepts a cookie for at least 30 s.
@@ -163,6 +174,17 @@ func (c *RelayClient) PeerPresent(sid wire.SessionID) bool {
 	defer c.mu.Unlock()
 	s := c.sessions[sid]
 	return s != nil && s.present
+}
+
+// Rejection returns the relay's last Reject of sid's Register and when it
+// came; code is 0 while the session is registered.
+func (c *RelayClient) Rejection(sid wire.SessionID) (code byte, at time.Time) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if s := c.sessions[sid]; s != nil {
+		return s.rejectCode, s.rejectAt
+	}
+	return 0, time.Time{}
 }
 
 // Register adds a session and announces it to the relay.
@@ -490,6 +512,7 @@ func (c *RelayClient) handleControl(m wire.RelayControl, viaTCP bool) {
 		if s := c.sessions[m.Session]; s != nil {
 			s.present = m.PeerPresent
 			s.lastAck = now
+			s.rejectCode, s.rejectAt = 0, time.Time{}
 		}
 		c.mu.Unlock()
 		if !viaTCP {
@@ -506,8 +529,27 @@ func (c *RelayClient) handleControl(m wire.RelayControl, viaTCP bool) {
 			c.opts.OnPeerJoined(m.Session)
 		}
 	case wire.RelayReject:
-		c.log.Warn("relay rejected request", "code", m.Code)
-		if c.opts.OnReject != nil {
+		// A rejected Register means we are not in the session: the peer is
+		// not reachable there, whatever an earlier Ack said. The callback
+		// runs when the answer changes, not on every retry.
+		changed, known := false, false
+		c.mu.Lock()
+		if s := c.sessions[m.Session]; s != nil {
+			known = true
+			changed = s.rejectCode != m.Code
+			s.rejectCode, s.rejectAt = m.Code, now
+			s.present = false
+			if m.Code == wire.RejectSessionFull && c.opts.RegisterInterval > fullRetry {
+				s.lastSent = now.Add(fullRetry - c.opts.RegisterInterval)
+			}
+		}
+		c.mu.Unlock()
+		if !known {
+			c.log.Warn("relay rejected request", "reason", wire.RejectReason(m.Code))
+			return
+		}
+		c.log.Debug("relay rejected a session", "reason", wire.RejectReason(m.Code))
+		if changed && c.opts.OnReject != nil {
 			c.opts.OnReject(m.Session, m.Code)
 		}
 	case wire.RelayEchoReply:

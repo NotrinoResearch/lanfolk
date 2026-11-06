@@ -881,3 +881,60 @@ instance answers at once, so starting Lanfolk is not slower.
 Rejected: changing Wails' lock to `SendMessageTimeout` (a fork of the
 dependency for one call), and a watchdog inside the app (a frozen app cannot
 be relied on to notice it is frozen).
+
+## D-041 A restarted client takes over its own relay registration
+
+Date: 2026-11-06.
+
+Two friends, both on 0.4.5 and both connected to the default relay, saw each
+other offline for more than ten minutes. Leaving and joining the network,
+reconnecting, a new invite and a connection code did not help; removing each
+other as friends and networks on both sides, turning Lanfolk off and on and
+starting over did. The keys were right on both sides: the connection code
+decrypted at the friend, which needs the right key pair. The diagnostics of
+the PC showed the friend's shared relay path chosen (the relay had said the
+other party was registered) but never answered.
+
+Cause, reproduced in a relay test and an engine test: a client whose
+service ended without its `Unregister` reaching the relay (setup ends a
+service that has not exited after 5 s; crash; power cut) restarted on the
+same UDP port, which the client remembers, so the relay saw the same
+address. Its friend was offline, so the new run's Register (new random
+token) took the free slot next to its own earlier run. The relay attributes
+relay data to a party by source address and refreshes the first match, the
+earlier run; the new run's Hellos (every 25 s) kept that party younger than
+the 30 s after which a silent party gives up its slot. The friend's
+Registers were rejected as `SessionFull` for as long as the client ran, the
+engine ignored the reject, and the client's own frames came back to itself.
+It ended only when nothing was sent in the session for the 120 s idle
+timeout, here because the friendships were removed. A new network changes
+nothing: the pair session is derived from the two keys. Engine, transport
+and relay code had not changed since 0.4.2; any unclean restart could do
+this, with an even chance depending on which slot the earlier run held.
+
+Decision:
+
+- Relay: a Register with an unknown token from the address of a party of
+  the session takes that party over (new token, same slot) and tells the
+  other party (`PeerJoined`), which greets the new run at once. One socket is
+  one client, so two parties never share an address; a known token that
+  roams onto the other party's address removes that party too. Metric
+  `lanfolk_relay_takeovers_total`. This fixes released clients as soon as the
+  relay is updated.
+- Client: on a clean exit `Unregister` is sent before the adapter is closed,
+  so that setup's 5 s limit does not cut it off. A `Reject(SessionFull)`
+  clears the peer's presence at that relay, is logged once per change with
+  the peer's name, is retried after 10 s instead of 30 s, and is listed in
+  the diagnostics (`RelayRejected`).
+
+Security: with a forged source address and the session ID, an attacker
+could already make the relay send data to the victim's address; now the
+attacker can also replace the victim party's token and, with that token,
+unregister it until the victim's next refresh (30 s). The session ID is
+known only to the two clients and the relay, and under load a new token from
+UDP needs a cookie, which proves the address. Accepted.
+
+Rejected: a token derived from the identity, the same across restarts (the
+earlier run would be a known party; but a token seen once on the path would
+stay valid for good), and a shorter grace for silent parties (the earlier
+run was not silent: the new run's data refreshed it).

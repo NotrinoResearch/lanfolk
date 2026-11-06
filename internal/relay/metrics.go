@@ -21,6 +21,7 @@ type metrics struct {
 	registrations       atomic.Uint64
 	rejects             atomic.Uint64
 	expired             atomic.Uint64
+	takeovers           atomic.Uint64
 	droppedRate         atomic.Uint64
 	droppedNoPeer       atomic.Uint64
 	droppedUnregistered atomic.Uint64
@@ -55,6 +56,7 @@ func (s *Server) writeMetrics(w http.ResponseWriter) {
 	line("lanfolk_relay_registrations_total", "counter", "Session registrations accepted.", m.registrations.Load())
 	line("lanfolk_relay_rejects_total", "counter", "Rejected registrations or connections.", m.rejects.Load())
 	line("lanfolk_relay_expired_parties_total", "counter", "Parties removed after the idle timeout.", m.expired.Load())
+	line("lanfolk_relay_takeovers_total", "counter", "Parties taken over by a new run of the client at the same address.", m.takeovers.Load())
 	line("lanfolk_relay_dropped_rate_total", "counter", "Packets dropped by rate limits.", m.droppedRate.Load())
 	line("lanfolk_relay_dropped_no_peer_total", "counter", "Data packets without a second party.", m.droppedNoPeer.Load())
 	line("lanfolk_relay_dropped_unregistered_total", "counter", "Data packets from unregistered sources.", m.droppedUnregistered.Load())

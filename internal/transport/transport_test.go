@@ -291,3 +291,68 @@ func TestRelayClientAnswersChallenge(t *testing.T) {
 		t.Fatal("no data after the challenge")
 	}
 }
+
+// A Register the relay rejects as full clears presence, is reported once per
+// change and is retried after fullRetry instead of the refresh interval
+// (D-041).
+func TestRelayClientSessionFull(t *testing.T) {
+	srv := startRelay(t)
+	opts := fastOpts()
+	opts.RegisterInterval = 30 * time.Second
+	a := newHarness(t, srv, opts)
+	b := newHarness(t, srv, opts)
+	var mu sync.Mutex
+	var rejects []byte
+	opts.OnReject = func(_ wire.SessionID, code byte) {
+		mu.Lock()
+		rejects = append(rejects, code)
+		mu.Unlock()
+	}
+	c := newHarness(t, srv, opts)
+	for _, h := range []*relayHarness{a, b, c} {
+		waitMode(t, h.client, ModeUDP)
+	}
+	sid := wire.SessionID{13}
+	a.client.Register(sid)
+	b.client.Register(sid)
+	waitFor := func(what string, cond func() bool) {
+		t.Helper()
+		deadline := time.Now().Add(3 * time.Second)
+		for !cond() {
+			if time.Now().After(deadline) {
+				t.Fatal("timed out waiting for " + what)
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+	}
+	waitFor("a and b paired", func() bool { return a.client.PeerPresent(sid) && b.client.PeerPresent(sid) })
+	c.client.Register(sid)
+	waitFor("reject", func() bool { code, _ := c.client.Rejection(sid); return code == wire.RejectSessionFull })
+	if c.client.PeerPresent(sid) {
+		t.Fatal("a rejected session reports the peer as present")
+	}
+	c.client.mu.Lock()
+	due := time.Until(c.client.sessions[sid].lastSent.Add(opts.RegisterInterval))
+	c.client.mu.Unlock()
+	if due > fullRetry || due < fullRetry-2*time.Second {
+		t.Fatalf("next register in %v, want about %v", due, fullRetry)
+	}
+	// Repeated rejects with the same code are not reported again.
+	c.client.Refresh(sid)
+	time.Sleep(200 * time.Millisecond)
+	c.client.Refresh(sid)
+	time.Sleep(200 * time.Millisecond)
+	mu.Lock()
+	n := len(rejects)
+	mu.Unlock()
+	if n != 1 {
+		t.Fatalf("OnReject called %d times, want 1", n)
+	}
+	// b leaves; c gets in and the reject is cleared.
+	b.client.Unregister(sid)
+	c.client.Refresh(sid)
+	waitFor("c admitted", func() bool { return c.client.PeerPresent(sid) })
+	if code, _ := c.client.Rejection(sid); code != 0 {
+		t.Fatalf("reject %d still recorded after the Ack", code)
+	}
+}

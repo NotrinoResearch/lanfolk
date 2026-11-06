@@ -19,6 +19,7 @@ import (
 	"github.com/NotrinoResearch/lanfolk/internal/store"
 	"github.com/NotrinoResearch/lanfolk/internal/tunwrap"
 	"github.com/NotrinoResearch/lanfolk/internal/version"
+	"github.com/NotrinoResearch/lanfolk/internal/wire"
 )
 
 // AddFriend adds a friend by code. The friendship is pending until the
@@ -136,6 +137,7 @@ func (e *Engine) SetNickname(n string) error {
 // Friends lists friends with presence.
 func (e *Engine) Friends() []ipc.Friend {
 	d := e.store.Data()
+	known := d.KnownNameMap()
 	now := time.Now()
 	out := make([]ipc.Friend, 0, len(d.Friends))
 	for _, f := range d.Friends {
@@ -163,6 +165,10 @@ func (e *Engine) Friends() []ipc.Friend {
 			} else if fr.Nickname == "" {
 				fr.Nickname = p.displayName()
 			}
+		} else if n := known[f.PublicKey]; n != "" {
+			// No session yet (the service is starting): the last announced
+			// nickname, as the member lists show it (D-037).
+			fr.Nickname = n
 		}
 		out = append(out, fr)
 	}
@@ -436,6 +442,9 @@ func (e *Engine) Diagnostics() string {
 		Friend, Confirmed        bool
 		Managed, Online          bool
 		Paths                    []pathDump
+		// RelayRejected lists relays that refuse this peer's session
+		// ("relay: reason, N s ago"), for example while it is full.
+		RelayRejected []string `json:",omitempty"`
 	}
 	now := time.Now()
 	rep := struct {
@@ -463,6 +472,7 @@ func (e *Engine) Diagnostics() string {
 		rep.Tunnel = &st
 	}
 	peers := e.peerListLocked()
+	relays := append([]*relayConn(nil), e.relays...)
 	e.mu.Unlock()
 	for _, p := range peers {
 		e.mu.Lock()
@@ -470,6 +480,12 @@ func (e *Engine) Diagnostics() string {
 			Friend: p.isFriend, Confirmed: p.confirmed, Managed: p.managed}
 		e.mu.Unlock()
 		d.Online = p.online(now, e.cfg.OfflineAfter)
+		for _, r := range relays {
+			if code, at := r.client.Rejection(p.sid); code != 0 {
+				d.RelayRejected = append(d.RelayRejected, fmt.Sprintf("%s: %s, %d s ago",
+					redactHostPort(r.name()), wire.RejectReason(code), int(now.Sub(at).Seconds())))
+			}
+		}
 		p.mu.Lock()
 		if p.pm != nil {
 			for _, pi := range p.pm.Paths(nanotime()) {

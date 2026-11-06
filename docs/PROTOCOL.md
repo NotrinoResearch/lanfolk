@@ -279,21 +279,34 @@ On `Register(session, token)`:
    changed, the party moves to the new endpoint (a changed source IP counts
    against the per-IP limit). The relay answers
    `RegisterAck(peer_present = whether the other party exists)`. A refresh
-   marks the party as active.
-3. **Unknown token, free slot.** The party joins. The relay answers
+   marks the party as active. If the other slot holds a party at the new
+   endpoint, that party is removed (see case 3).
+3. **Unknown token from the endpoint of a party (takeover).** The client
+   restarted on the same socket without its `Unregister` reaching the relay
+   (killed, crashed, power cut), so the party's earlier run is gone: the
+   party takes the new token and stays in its slot. The relay answers
+   `RegisterAck(peer_present = whether the other party exists)` and sends
+   `PeerJoined(session)` to the other party, which greets the new run at
+   once. Two parties of one session never share an endpoint (D-041).
+4. **Unknown token, free slot.** The party joins. The relay answers
    `RegisterAck(peer_present = 1)` and sends `PeerJoined(session)` to the
    other party.
-4. **Unknown token, session full.** The new party takes the slot of a party
+5. **Unknown token, session full.** The new party takes the slot of a party
    that has been silent (no `Register`, no relay data) for more than **a
    quarter of the idle timeout, 30 s by default**. Otherwise the relay
    answers `Reject(SessionFull)`.
+
+Relay data is attributed to a party by its source endpoint. Without case 3
+an earlier run's party at the same address was kept fresh by the new run's
+own data, so the other side met `SessionFull` for as long as the client ran,
+and the new run's frames were relayed back to itself (D-041).
 
 #### 4.3.1 Register cookie (under load)
 
 A Register over UDP proves nothing about its source address, so a flood of
 Registers with forged source addresses could fill the session table. While
 the relay is **under pressure**, a UDP Register that would create a new
-session (case 1) or a new party (cases 3 and 4) must carry a cookie:
+session (case 1) or a new party (cases 3 to 5) must carry a cookie:
 
 1. Without a valid cookie the relay creates no state and answers
    `Challenge(session, cookie)`.
@@ -404,8 +417,12 @@ These values are used by the relay client in `internal/transport`:
 - It re-sends `Register` for every active session every **30 s**, and again
   after every change of transport.
 - It resolves the relay name again every 5 minutes.
-- On a clean exit it sends `Unregister` for every session, so that the
-  restarted client does not meet its own stale registration as `SessionFull`.
+- On a clean exit it sends `Unregister` for every session before anything
+  slow (closing the adapter), so that a setup that ends the service after
+  5 s does not leave registrations behind.
+- After `Reject(SessionFull)` it treats the peer as absent at that relay and
+  registers again after **10 s** instead of 30 s. Diagnostics list the relays
+  that refuse a peer's session.
   Invite sessions ([10.3](#103-invite-code)) are registered like pair sessions.
 - A client registers at up to three relays at once (the default relay, up to
   three relays from the signed member list, relays from the user's settings;

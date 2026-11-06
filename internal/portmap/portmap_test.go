@@ -194,7 +194,9 @@ func TestBackoffRetryAfterFailure(t *testing.T) {
 		select {
 		case ev := <-events:
 			if ev.ok {
-				if ev.mp.Protocol != ProtoPCP {
+				// Either protocol: if the gateway answers again while an
+				// attempt is already past PCP, NAT-PMP gets the mapping.
+				if p := ev.mp.Protocol; p != ProtoPCP && p != ProtoNATPMP {
 					t.Fatalf("unexpected mapping %+v", ev)
 				}
 				return
