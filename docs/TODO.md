@@ -152,6 +152,9 @@ Last updated: 5 November 2026.
       restarted on the same socket took its slot over, the friend paired
       and data went both ways; installed 0.4.5 clients re-registered by
       themselves; the other containers on the server were unchanged.
+- [x] Upgrade check in the lab VM (7 November): 0.4.5 to 0.4.6 with a
+      silent setup in 24 s; the service came back on the same UDP port and
+      registered at the relay with no reject.
 - [ ] Two-home check with osman after the relay update.
 
 ## Release 0.5.0: connection resilience
