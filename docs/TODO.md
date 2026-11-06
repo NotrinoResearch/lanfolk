@@ -146,7 +146,12 @@ Last updated: 5 November 2026.
       longer locks its friend out of their relay session (D-041). Reproduced
       in a relay test and an engine test (both fail on the old relay); the
       relay fix also helps released clients.
-- [ ] Shared relay updated with the takeover (relay image 0.2.1).
+- [x] Shared relay updated with the takeover (relay image 0.2.1, 6 November;
+      the 0.2.0 relay had counted 689 rejects against 272 registrations in
+      two days). Checked against the live relay from this PC: a run that
+      restarted on the same socket took its slot over, the friend paired
+      and data went both ways; installed 0.4.5 clients re-registered by
+      themselves; the other containers on the server were unchanged.
 - [ ] Two-home check with osman after the relay update.
 
 ## Release 0.5.0: connection resilience
